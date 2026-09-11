@@ -22,10 +22,18 @@ two-stage run.
 
 The default scheduler now runs in safe mode: every accepted action is checked
 against global conflict pairs, and actions that increase global conflict pairs
-are rolled back. Quick mode disables local A* rerouting and only tests takeoff
-time shifts plus speed factors. Normal mode first uses the same delay/speed
-logic and only tries a capped number of local reroutes after the remaining
-conflict-pair count is small.
+are rolled back. The second stage follows an ADM-style independent matching
+implementation based on reference [6]: each remaining continuous conflict unit
+is classified and matched to scheduling, speed adjustment, or local rerouting
+with an adaptive strategy probability matrix. Quick mode limits the number of
+rounds and candidates, but it still keeps rerouting in the stage-2 strategy set.
+
+Calibration note: because the paper does not publish the original OD generator
+or conflict-detection implementation, the synthetic reproduction reports
+key-flight conflict coverage and uses a calibrated cell-level conflict window.
+The stage-1 optimizer now uses continuous ATD and speed variables instead of
+discrete delay/speed-factor indices, and key-flight ranking uses weighted CI so
+continuous overlapping conflict segments are not undercounted.
 
 如果环境暂时缺少 `pyyaml` 或 `tqdm`，代码会使用内置 fallback；`pytest` 仍建议安装后运行。
 

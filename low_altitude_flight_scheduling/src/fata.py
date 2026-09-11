@@ -57,6 +57,7 @@ def fata_optimize(
     parf: float = 0.2,
     callback: Callable[[np.ndarray, float, int], dict[str, float]] | None = None,
     objective_with_iter: ObjectiveWithIter | None = None,
+    initial_positions: np.ndarray | list[np.ndarray] | None = None,
 ) -> FATAResult:
     rng = np.random.default_rng(seed)
     lb_arr = np.full(dim, lb, dtype=float) if np.isscalar(lb) else np.asarray(lb, dtype=float)
@@ -68,6 +69,12 @@ def fata_optimize(
     else:
         flight = rng.random((no_p, dim)) * (ub_arr - lb_arr) + lb_arr
     flight = np.clip(flight, lb_arr, ub_arr)
+    if initial_positions is not None:
+        warm = np.atleast_2d(np.asarray(initial_positions, dtype=float))
+        if warm.shape[1] != dim:
+            raise ValueError(f"initial_positions has dimension {warm.shape[1]}, expected {dim}")
+        warm_count = min(no_p, warm.shape[0])
+        flight[:warm_count] = np.clip(warm[:warm_count], lb_arr, ub_arr)
 
     fitness = np.full(no_p, np.inf)
     best_pos = np.zeros(dim)

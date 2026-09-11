@@ -38,32 +38,114 @@ def collective_influence(graph: nx.Graph, l: int = 2) -> dict[int, float]:
     return scores
 
 
+def weighted_collective_influence(graph: nx.Graph, l: int = 2) -> dict[int, float]:
+    scores: dict[int, float] = {}
+    strengths = dict(graph.degree(weight="count"))
+    degrees = dict(graph.degree())
+    for node in graph.nodes:
+        if degrees[node] <= 0 or strengths[node] <= 1e-12:
+            scores[node] = 0.0
+            continue
+        boundary = [n for n, dist in nx.single_source_shortest_path_length(graph, node, cutoff=l).items() if dist == l]
+        scores[node] = float(strengths[node] * sum(max(0.0, strengths[v]) for v in boundary))
+    return scores
+
+
 def network_metrics(graph: nx.Graph, ci_l: int = 2) -> pd.DataFrame:
     degree = dict(graph.degree())
+    weighted_degree = dict(graph.degree(weight="count"))
     deg_cent = nx.degree_centrality(graph)
     close = nx.closeness_centrality(graph) if graph.number_of_edges() else {n: 0.0 for n in graph.nodes}
     between = nx.betweenness_centrality(graph, normalized=True) if graph.number_of_edges() else {n: 0.0 for n in graph.nodes}
     pagerank = nx.pagerank(graph) if graph.number_of_edges() else {n: 0.0 for n in graph.nodes}
     ci = collective_influence(graph, ci_l)
+    weighted_ci = weighted_collective_influence(graph, ci_l)
     rows = []
     for node in graph.nodes:
         rows.append(
             {
                 "flight_id": node,
                 "degree": degree[node],
+                "weighted_degree": weighted_degree[node],
                 "degree_centrality": deg_cent[node],
                 "closeness": close[node],
                 "betweenness": between[node],
                 "pagerank": pagerank[node],
                 "collective_influence": ci[node],
+                "weighted_collective_influence": weighted_ci[node],
             }
         )
-    return pd.DataFrame(rows).sort_values(["collective_influence", "degree", "pagerank"], ascending=False)
+    return pd.DataFrame(rows).sort_values(["weighted_collective_influence", "weighted_degree", "collective_influence", "degree", "pagerank"], ascending=False)
 
 
 def select_key_flights(metrics: pd.DataFrame, important_ratio: float, n_flights: int) -> list[int]:
     k = max(1, int(round(float(important_ratio) * n_flights)))
-    return [int(v) for v in metrics.head(k)["flight_id"].tolist()]
+    sort_cols = [col for col in ["weighted_collective_influence", "weighted_degree", "collective_influence", "degree", "pagerank"] if col in metrics.columns]
+    ranked = metrics.sort_values(sort_cols, ascending=False) if sort_cols else metrics
+    return [int(v) for v in ranked.head(k)["flight_id"].tolist()]
+
+
+def select_key_flights_for_coverage(
+    metrics: pd.DataFrame,
+    conflicts: list[Conflict],
+    important_ratio: float,
+    n_flights: int,
+    target_coverage: float = 0.80,
+    max_ratio: float = 0.25,
+) -> list[int]:
+    """Select a compact key set that covers the weighted conflict network.
+
+    Conflict points act as edge weights. At each step, the flight covering the
+    most currently uncovered points is selected; the CI ranking breaks ties.
+    This keeps stage 1 focused when repeated conflicts lie on a few network
+    edges whose endpoints can rank poorly under unweighted topology alone.
+    """
+    if not conflicts:
+        return select_key_flights(metrics, important_ratio, n_flights)
+
+    min_k = max(1, int(round(float(important_ratio) * n_flights)))
+    max_k = max(min_k, min(n_flights, int(np.ceil(float(max_ratio) * n_flights))))
+    target = float(np.clip(target_coverage, 0.0, 1.0))
+    sort_cols = [
+        col
+        for col in ["weighted_collective_influence", "weighted_degree", "collective_influence", "degree", "pagerank"]
+        if col in metrics.columns
+    ]
+    ranked = metrics.sort_values(sort_cols, ascending=False) if sort_cols else metrics
+    rank_order = [int(v) for v in ranked["flight_id"].tolist()]
+    rank_index = {fid: idx for idx, fid in enumerate(rank_order)}
+    candidates = list(dict.fromkeys(rank_order + list(range(n_flights))))
+
+    selected: list[int] = []
+    covered: set[int] = set()
+    while len(selected) < max_k:
+        best_fid: int | None = None
+        best_gain = -1
+        for fid in candidates:
+            if fid in selected:
+                continue
+            gain = sum(
+                1
+                for idx, conflict in enumerate(conflicts)
+                if idx not in covered and fid in {int(conflict.plan_a), int(conflict.plan_b)}
+            )
+            if gain > best_gain or (
+                gain == best_gain
+                and rank_index.get(fid, n_flights) < rank_index.get(best_fid, n_flights)
+            ):
+                best_fid = fid
+                best_gain = gain
+        if best_fid is None:
+            break
+        selected.append(best_fid)
+        covered.update(
+            idx
+            for idx, conflict in enumerate(conflicts)
+            if best_fid in {int(conflict.plan_a), int(conflict.plan_b)}
+        )
+        if len(selected) >= min_k and len(covered) / len(conflicts) >= target:
+            break
+    return selected
 
 
 def attack_experiment(graph: nx.Graph, metrics: pd.DataFrame, metric_name: str) -> pd.DataFrame:

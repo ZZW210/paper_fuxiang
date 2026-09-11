@@ -19,19 +19,29 @@ from src.conflict_detection import (
     write_calibration_report,
     write_conflict_diagnostics,
 )
-from src.conflict_network import build_conflict_network, network_metrics, run_attack_suite, select_key_flights, write_network_outputs
+from src.conflict_network import (
+    build_conflict_network,
+    network_metrics,
+    run_attack_suite,
+    select_key_flights,
+    select_key_flights_for_coverage,
+    write_network_outputs,
+)
 from src.fata import fata_optimize
 from src.flight_plan import generate_flight_plans, write_flight_generation_report
 from src.grid import AirspaceGrid
 from src.optimization_model import (
     apply_delay_speed_vector,
+    apply_continuous_atd_speed_vector,
     changed_count,
     delayed_count,
+    evaluate_continuous_atd_speed_solution,
     evaluate_delay_speed_solution,
     get_optimization_stats,
     independent_matching_deconfliction,
     reset_optimization_stats,
     risk_increase_ratio,
+    solution_bounds_continuous_atd_speed,
     solution_bounds_delay_speed,
 )
 from src.risk_map import generate_risk_map
@@ -60,6 +70,40 @@ def _counts(conflicts: list[object]) -> dict[str, int]:
 def _print_counts(stage: str, conflicts: list[object]) -> None:
     counts = _counts(conflicts)
     print(f"{stage}: {counts['points']} points, {counts['pairs']} pairs")
+
+
+def _key_conflict_coverage(conflicts: list[object], key_ids: list[int]) -> dict[str, float]:
+    keys = set(int(fid) for fid in key_ids)
+    if not conflicts:
+        return {
+            "key_conflict_point_coverage": 0.0,
+            "key_conflict_pair_coverage": 0.0,
+            "key_incident_conflict_points": 0.0,
+            "key_incident_conflict_pairs": 0.0,
+            "nonkey_conflict_points": 0.0,
+            "nonkey_conflict_pairs": 0.0,
+        }
+    incident_points = [
+        conflict
+        for conflict in conflicts
+        if int(getattr(conflict, "plan_a")) in keys or int(getattr(conflict, "plan_b")) in keys
+    ]
+    all_pairs = {
+        (min(int(getattr(conflict, "plan_a")), int(getattr(conflict, "plan_b"))), max(int(getattr(conflict, "plan_a")), int(getattr(conflict, "plan_b"))))
+        for conflict in conflicts
+    }
+    incident_pairs = {
+        (min(int(getattr(conflict, "plan_a")), int(getattr(conflict, "plan_b"))), max(int(getattr(conflict, "plan_a")), int(getattr(conflict, "plan_b"))))
+        for conflict in incident_points
+    }
+    return {
+        "key_conflict_point_coverage": float(len(incident_points) / max(1, len(conflicts))),
+        "key_conflict_pair_coverage": float(len(incident_pairs) / max(1, len(all_pairs))),
+        "key_incident_conflict_points": float(len(incident_points)),
+        "key_incident_conflict_pairs": float(len(incident_pairs)),
+        "nonkey_conflict_points": float(len(conflicts) - len(incident_points)),
+        "nonkey_conflict_pairs": float(len(all_pairs) - len(incident_pairs)),
+    }
 
 
 def _append_trace(trace: list[dict[str, object]], stage: str, logs: list[dict[str, object]]) -> None:
@@ -131,6 +175,13 @@ def _runtime_exceeded(deadline: float) -> bool:
     return time.perf_counter() >= deadline
 
 
+def _stage1_warm_start(plans: list[object], key_ids: list[int], lb: np.ndarray, ub: np.ndarray) -> np.ndarray:
+    by_id = {int(getattr(plan, "id")): plan for plan in plans}
+    atd = [float(getattr(by_id[fid], "etd")) for fid in key_ids]
+    speeds = [float(np.mean(getattr(by_id[fid], "speed_profile") or [10.0])) for fid in key_ids]
+    return np.clip(np.asarray(atd + speeds, dtype=float), lb, ub)
+
+
 def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parent
@@ -168,16 +219,41 @@ def main() -> None:
     graph = build_conflict_network(plans, conflicts0)
     metrics_df = network_metrics(graph, ci_l=int(cfg["network"]["ci_l"]))
     key_ratio = float(cfg["optimization"].get("stage1_key_ratio", cfg["optimization"]["important_ratio"]))
-    key_ids = select_key_flights(metrics_df, key_ratio, len(plans))
+    key_selection_mode = str(cfg["optimization"].get("stage1_key_selection_mode", "fixed_ci"))
+    if key_selection_mode == "coverage_adaptive":
+        key_ids = select_key_flights_for_coverage(
+            metrics_df,
+            conflicts0,
+            key_ratio,
+            len(plans),
+            target_coverage=float(cfg["optimization"].get("stage1_conflict_coverage_target", 0.80)),
+            max_ratio=float(cfg["optimization"].get("stage1_max_key_ratio", 0.25)),
+        )
+    else:
+        key_ids = select_key_flights(metrics_df, key_ratio, len(plans))
+    key_coverage = _key_conflict_coverage(conflicts0, key_ids)
+    print(
+        "Key-flight coverage: "
+        f"{key_coverage['key_incident_conflict_points']:.0f}/{count_conflict_points(conflicts0)} points "
+        f"({key_coverage['key_conflict_point_coverage']:.1%})"
+    )
     attack_df = run_attack_suite(graph, metrics_df)
     write_network_outputs(graph, metrics_df, attack_df, out)
 
     stage1_fata_time = 0.0
     if key_ids and not _runtime_exceeded(deadline):
-        lb, ub = solution_bounds_delay_speed(key_ids, cfg)
+        stage1_mode = str(cfg["optimization"].get("stage1_decision_mode", "continuous_atd_speed"))
+        if stage1_mode == "continuous_atd_speed":
+            lb, ub = solution_bounds_continuous_atd_speed(plans, key_ids, cfg)
 
-        def objective(vec: np.ndarray) -> float:
-            return evaluate_delay_speed_solution(vec, plans, key_ids, cfg, grid, risk).fitness
+            def objective(vec: np.ndarray) -> float:
+                return evaluate_continuous_atd_speed_solution(vec, plans, key_ids, cfg, grid, risk).fitness
+
+        else:
+            lb, ub = solution_bounds_delay_speed(key_ids, cfg)
+
+            def objective(vec: np.ndarray) -> float:
+                return evaluate_delay_speed_solution(vec, plans, key_ids, cfg, grid, risk).fitness
 
         fata_started = time.perf_counter()
         fata_res = fata_optimize(
@@ -190,9 +266,13 @@ def main() -> None:
             seed=args.seed,
             improved=True,
             parf=float(cfg["fata"]["Parf"]),
+            initial_positions=_stage1_warm_start(plans, key_ids, lb, ub) if stage1_mode == "continuous_atd_speed" else None,
         )
         stage1_fata_time = time.perf_counter() - fata_started
-        stage1_plans = apply_delay_speed_vector(plans, key_ids, fata_res.best_position, cfg, grid, risk)
+        if stage1_mode == "continuous_atd_speed":
+            stage1_plans = apply_continuous_atd_speed_vector(plans, key_ids, fata_res.best_position, cfg, grid, risk)
+        else:
+            stage1_plans = apply_delay_speed_vector(plans, key_ids, fata_res.best_position, cfg, grid, risk)
     else:
         fata_res = fata_optimize(lambda x: float(np.sum(x * x)), np.array([0.0]), np.array([1.0]), 1, 4, 4, seed=args.seed)
         stage1_plans = [p.copy() for p in plans]
@@ -271,6 +351,15 @@ def main() -> None:
         "initial_conflict_points_no_uncertain": count_conflict_points(conflicts_no),
         "initial_conflict_pairs_no_uncertain": count_conflict_pairs(conflicts_no),
         "initial_conflict_edges_no_uncertain": count_conflict_edges(conflicts_no),
+        "key_conflict_point_coverage": key_coverage["key_conflict_point_coverage"],
+        "key_conflict_pair_coverage": key_coverage["key_conflict_pair_coverage"],
+        "key_incident_conflict_points": key_coverage["key_incident_conflict_points"],
+        "key_incident_conflict_pairs": key_coverage["key_incident_conflict_pairs"],
+        "nonkey_conflict_points": key_coverage["nonkey_conflict_points"],
+        "nonkey_conflict_pairs": key_coverage["nonkey_conflict_pairs"],
+        "stage1_key_flight_count": len(key_ids),
+        "stage1_conflict_reduction_ratio": 1.0 - count_conflict_points(conflicts1) / max(1, count_conflict_points(conflicts0)),
+        "stage2_conflict_reduction_ratio": 1.0 - count_conflict_points(final_conflicts) / max(1, count_conflict_points(conflicts1)),
         "final_conflicts_two_stage": count_conflict_points(final_conflicts),
         "final_conflicts_one_stage": count_conflict_points(one_stage_final_conflicts),
         "final_conflict_points_two_stage": count_conflict_points(final_conflicts),

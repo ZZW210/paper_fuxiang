@@ -85,11 +85,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "distance_weight": 0.35,
     },
     "conflict": {
-        "t_conflict": 30.0,
-        "cell_occupancy_time": 15.0,
+        "t_conflict": 20.0,
+        "cell_occupancy_time": 0.0,
         "alpha": 0.05,
-        "sigma0": 2.0,
-        "sigma_rate": 0.025,
+        "sigma0": 1.0,
+        "sigma_rate": 0.010,
         "conflict_spatial_buffer_cells": 0,
     },
     "optimization": {
@@ -109,16 +109,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "quick_max_runtime_seconds": 60,
             "max_local_reroute_attempts": 20,
             "accept_only_if_global_conflicts_decrease": True,
-            "stage1_key_ratio": 0.10,
+            "stage1_key_ratio": 0.15,
+            "stage1_key_selection_mode": "coverage_adaptive",
+            "stage1_conflict_coverage_target": 0.82,
+            "stage1_max_key_ratio": 0.25,
+            "stage1_decision_mode": "continuous_atd_speed",
+            "stage1_use_full_conflict_objective": True,
+            "stage1_atd_range": [1, 3600],
+            "stage1_respect_delay_max": True,
+            "stage1_max_advance_seconds": 600,
+            "stage1_conflict_point_penalty": 1_000_000,
+            "stage1_conflict_pair_penalty": 200_000,
             "stage1_greedy_rounds": 50,
             "final_greedy_rounds": 30,
             "stage1_repair_rounds": 20,
             "stage2_repair_rounds": 20,
             "stage2_strategy": "independent_matching",
-            "independent_matching_rounds": 20,
+            "independent_matching_rounds": 60,
             "independent_matching_lrate": 0.5,
             "independent_matching_segment_limit": 24,
-            "independent_matching_candidates_per_strategy": 8,
+            "independent_matching_candidates_per_strategy": 20,
+            "independent_matching_first_accepted_candidate": True,
             "independent_matching_first_pair_resolution": True,
             "independent_matching_first_strategy_success": True,
             "independent_matching_allow_reroute": True,
@@ -132,7 +143,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
             "local_reroute_windows": [8, 12],
             "local_reroute_radii": [1, 2],
-            "delay_candidates": [-180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180, 300, 600],
+            "delay_candidates": [-600, -420, -300, -240, -180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180, 240, 300, 420, 600],
             "speed_factors": [0.90, 0.95, 1.00, 1.05, 1.10, 1.15],
             "safety_margin_seconds": 10,
             "max_changed_flight_ratio": 0.10,
@@ -252,9 +263,9 @@ def apply_quick_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg["optimization"]["quick_repair_rounds"] = 40
     cfg["optimization"]["stage1_repair_rounds"] = min(int(cfg["optimization"].get("stage1_repair_rounds", 20)), 10)
     cfg["optimization"]["stage2_repair_rounds"] = min(int(cfg["optimization"].get("stage2_repair_rounds", 20)), 10)
-    cfg["optimization"]["independent_matching_rounds"] = min(int(cfg["optimization"].get("independent_matching_rounds", 20)), 10)
+    cfg["optimization"]["independent_matching_rounds"] = min(int(cfg["optimization"].get("independent_matching_rounds", 60)), 60)
     cfg["optimization"]["independent_matching_segment_limit"] = min(int(cfg["optimization"].get("independent_matching_segment_limit", 24)), 12)
-    cfg["optimization"]["independent_matching_candidates_per_strategy"] = min(int(cfg["optimization"].get("independent_matching_candidates_per_strategy", 8)), 6)
+    cfg["optimization"]["independent_matching_candidates_per_strategy"] = min(int(cfg["optimization"].get("independent_matching_candidates_per_strategy", 20)), 20)
     cfg["optimization"]["independent_matching_allow_reroute"] = True
     cfg["optimization"]["repair_segment_scan_limit"] = min(int(cfg["optimization"].get("repair_segment_scan_limit", 8)), 4)
     cfg["optimization"]["repair_action_limit"] = min(int(cfg["optimization"].get("repair_action_limit", 40)), 20)

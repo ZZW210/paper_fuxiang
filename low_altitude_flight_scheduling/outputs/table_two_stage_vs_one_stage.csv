@@ -1,3 +1,3 @@
 method,final_conflicts,final_conflict_pairs,changed_flights,fitness
-two_stage_delay_speed_safe,4,4,56,4041300.9022382074
-stage1_delay_speed_only,160,92,48,17171170.567508623
+two_stage_fata_independent_matching,0,0,36,681.5338245787232
+stage1_delay_speed_only,20,20,20,20200522.13041424

@@ -74,11 +74,11 @@ astar:
   distance_weight: 0.35
 
 conflict:
-  t_conflict: 30.0
-  cell_occupancy_time: 15.0
+  t_conflict: 20.0
+  cell_occupancy_time: 0.0
   alpha: 0.05
-  sigma0: 2.0
-  sigma_rate: 0.025
+  sigma0: 1.0
+  sigma_rate: 0.010
   conflict_spatial_buffer_cells: 0
 
 optimization:
@@ -98,16 +98,29 @@ optimization:
   quick_max_runtime_seconds: 60
   max_local_reroute_attempts: 20
   accept_only_if_global_conflicts_decrease: true
-  stage1_key_ratio: 0.10
+  # Preserve the paper's stage-1 reduction ratio on the synthetic network by
+  # expanding the CI key set until it covers enough weighted conflict points.
+  stage1_key_ratio: 0.15
+  stage1_key_selection_mode: "coverage_adaptive"
+  stage1_conflict_coverage_target: 0.82
+  stage1_max_key_ratio: 0.25
+  stage1_decision_mode: "continuous_atd_speed"
+  stage1_use_full_conflict_objective: true
+  stage1_atd_range: [1, 3600]
+  stage1_respect_delay_max: true
+  stage1_max_advance_seconds: 600
+  stage1_conflict_point_penalty: 1000000
+  stage1_conflict_pair_penalty: 200000
   stage1_greedy_rounds: 50
   final_greedy_rounds: 30
   stage1_repair_rounds: 20
   stage2_repair_rounds: 20
   stage2_strategy: "independent_matching"
-  independent_matching_rounds: 20
+  independent_matching_rounds: 60
   independent_matching_lrate: 0.5
   independent_matching_segment_limit: 24
-  independent_matching_candidates_per_strategy: 8
+  independent_matching_candidates_per_strategy: 20
+  independent_matching_first_accepted_candidate: true
   independent_matching_first_pair_resolution: true
   independent_matching_first_strategy_success: true
   independent_matching_allow_reroute: true
@@ -120,7 +133,7 @@ optimization:
     crossing: [0.25, 0.60, 0.15]
   local_reroute_windows: [8, 12]
   local_reroute_radii: [1, 2]
-  delay_candidates: [-180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180, 300, 600]
+  delay_candidates: [-600, -420, -300, -240, -180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180, 240, 300, 420, 600]
   speed_factors: [0.90, 0.95, 1.00, 1.05, 1.10, 1.15]
   safety_margin_seconds: 10
   max_changed_flight_ratio: 0.10

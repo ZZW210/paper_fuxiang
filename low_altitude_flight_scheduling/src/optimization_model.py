@@ -205,6 +205,100 @@ def apply_delay_speed_vector(
     return out
 
 
+def solution_bounds_continuous_atd_speed(
+    plans: list[FlightPlan],
+    flight_ids: list[int],
+    cfg: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    id_to_plan = {plan.id: plan for plan in plans}
+    speed_min, speed_max = [float(v) for v in cfg["optimization"]["speed_range"]]
+    global_atd_min, global_atd_max = [float(v) for v in cfg["optimization"].get("stage1_atd_range", cfg["optimization"]["t_ATD_range"])]
+    respect_delay_max = bool(cfg["optimization"].get("stage1_respect_delay_max", True))
+    max_delay = float(cfg["optimization"].get("t_delay_max", global_atd_max))
+    max_advance = float(cfg["optimization"].get("stage1_max_advance_seconds", 600.0))
+    atd_lb: list[float] = []
+    atd_ub: list[float] = []
+    for fid in flight_ids:
+        plan = id_to_plan.get(fid)
+        if plan is None or not respect_delay_max:
+            atd_lb.append(global_atd_min)
+            atd_ub.append(global_atd_max)
+            continue
+        atd_lb.append(max(global_atd_min, float(plan.etd) - max_advance))
+        atd_ub.append(min(global_atd_max, float(plan.etd) + max_delay))
+    lb = np.array(atd_lb + [speed_min] * len(flight_ids), dtype=float)
+    ub = np.array(atd_ub + [speed_max] * len(flight_ids), dtype=float)
+    return lb, ub
+
+
+def apply_continuous_atd_speed_vector(
+    plans: list[FlightPlan],
+    flight_ids: list[int],
+    vector: np.ndarray,
+    cfg: dict,
+    grid: AirspaceGrid,
+    risk_map: np.ndarray,
+) -> list[FlightPlan]:
+    if not flight_ids:
+        return clone_plans(plans)
+    out = list(plans)
+    id_to_idx = {plan.id: idx for idx, plan in enumerate(out)}
+    speed_min, speed_max = [float(v) for v in cfg["optimization"]["speed_range"]]
+    atd_min, atd_max = [float(v) for v in cfg["optimization"].get("stage1_atd_range", cfg["optimization"]["t_ATD_range"])]
+    vector = np.asarray(vector, dtype=float)
+    n = len(flight_ids)
+    for j, fid in enumerate(flight_ids):
+        if fid not in id_to_idx or len(vector) <= j:
+            continue
+        idx = id_to_idx[fid]
+        base = out[idx]
+        base_speed = float(np.mean(base.speed_profile or [cfg["flight"]["default_speed"]]))
+        target_atd = float(np.clip(vector[j], atd_min, atd_max))
+        speed = float(np.clip(vector[n + j], speed_min, speed_max)) if len(vector) > n + j else base_speed
+        delta = target_atd - float(base.etd)
+        updated = update_plan_timing(base, speed=speed, delay=delta, cell_size=grid.cell_size)
+        updated.changed = bool(updated.changed or abs(delta) > 1e-6 or abs(speed - base_speed) > 1e-6)
+        out[idx] = recompute_plan(updated, grid, risk_map, speed=speed)
+    return out
+
+
+def evaluate_continuous_atd_speed_solution(
+    vector: np.ndarray,
+    plans: list[FlightPlan],
+    flight_ids: list[int],
+    cfg: dict,
+    grid: AirspaceGrid,
+    risk_map: np.ndarray,
+) -> Evaluation:
+    new_plans = apply_continuous_atd_speed_vector(plans, flight_ids, vector, cfg, grid, risk_map)
+    use_full = bool(cfg["optimization"].get("stage1_use_full_conflict_objective", True))
+    active_ids = None if use_full or not flight_ids else set(flight_ids)
+    conflicts = detect_conflicts(new_plans, cfg, uncertain=True, active_ids=active_ids)
+    pairs = count_conflict_pairs(conflicts)
+    points = count_conflict_points(conflicts)
+    total_delay = float(sum(max(0.0, p.delay) for p in new_plans))
+    total_air = float(sum(p.total_air_time for p in new_plans))
+    total_risk = float(sum(p.risk_sum for p in new_plans))
+    delayed = delayed_count(new_plans, float(cfg["optimization"].get("delay_count_threshold", 30.0)))
+    battery = int(sum(1 for p in new_plans if p.total_air_time > float(cfg["optimization"]["t_battery"])))
+    point_penalty = float(cfg["optimization"].get("stage1_conflict_point_penalty", 1_000_000.0))
+    pair_penalty = float(cfg["optimization"].get("stage1_conflict_pair_penalty", 200_000.0))
+    soft = _soft_cost(new_plans, cfg) + 0.05 * _stage1_speed_deviation(plans, new_plans)
+    fitness = float(point_penalty * points + pair_penalty * pairs + 25_000.0 * battery + soft)
+    return Evaluation(fitness, points, total_delay, total_air, total_risk, delayed, battery, new_plans)
+
+
+def _stage1_speed_deviation(base_plans: list[FlightPlan], new_plans: list[FlightPlan]) -> float:
+    base_by_id = {plan.id: plan for plan in base_plans}
+    total = 0.0
+    for plan in new_plans:
+        base = base_by_id.get(plan.id)
+        if base is None:
+            continue
+        total += abs(float(np.mean(plan.speed_profile or [0.0])) - float(np.mean(base.speed_profile or [0.0])))
+    return total
+
+
 def evaluate_delay_speed_solution(
     vector: np.ndarray,
     plans: list[FlightPlan],
@@ -500,6 +594,8 @@ def independent_matching_deconfliction(
                     )
                     if best is None or rank < best[3]:
                         best = (trial, trial_conflicts, action_log, rank, strategy)
+                    if bool(opt_cfg.get("independent_matching_first_accepted_candidate", True)):
+                        break
                     if bool(opt_cfg.get("independent_matching_first_pair_resolution", True)) and not _pair_present(trial_conflicts, pair):
                         break
                 if best is not None and bool(opt_cfg.get("independent_matching_first_strategy_success", True)):
@@ -575,9 +671,18 @@ def _update_adm_probability(probs: dict[str, float], selected_strategy: str, lra
 
 
 def _sample_adm_strategy_order(probs: dict[str, float], rng: np.random.Generator) -> list[str]:
-    p = np.array([float(probs[strategy]) for strategy in _ADM_STRATEGIES], dtype=float)
-    p = p / max(float(p.sum()), 1e-12)
-    return [str(v) for v in rng.choice(np.array(_ADM_STRATEGIES), size=len(_ADM_STRATEGIES), replace=False, p=p)]
+    weighted = [(strategy, max(0.0, float(probs[strategy]))) for strategy in _ADM_STRATEGIES]
+    positive = [(strategy, weight) for strategy, weight in weighted if weight > 1e-12]
+    zero_weight = [strategy for strategy, weight in weighted if weight <= 1e-12]
+    if positive:
+        labels = np.array([strategy for strategy, _ in positive])
+        p = np.array([weight for _, weight in positive], dtype=float)
+        sampled = [str(v) for v in rng.choice(labels, size=len(labels), replace=False, p=p / p.sum())]
+    else:
+        sampled = []
+    if zero_weight:
+        sampled.extend(str(v) for v in rng.permutation(np.array(zero_weight)))
+    return sampled
 
 
 def _classify_adm_segment(
