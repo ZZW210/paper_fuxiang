@@ -19,6 +19,14 @@ from .flight_plan import FlightPlan, apply_speed_factor, recompute_eta_times, sh
 from .grid import AirspaceGrid, GridPoint
 from .utils import path_distance_m
 
+# Public paper model API; its implementation has no dependency on repair code.
+from .paper_optimization import (
+    paper_objective_components, normalize_paper_objectives, paper_fitness,
+    conflict_weight_delta, build_stage1_decision_layout, decode_stage1_solution,
+    evaluate_stage1_paper_solution, build_stage2_decision_layout,
+    decode_stage2_solution, evaluate_stage2_paper_solution,
+)
+
 _ASTAR_CALLS = 0
 _ADM_STRATEGIES = ("delay", "speed", "reroute")
 _ADM_CLASSES = ("head_to_head", "cluster", "crossing")

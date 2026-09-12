@@ -85,6 +85,15 @@ def select_key_flights(metrics: pd.DataFrame, important_ratio: float, n_flights:
     return [int(v) for v in ranked.head(k)["flight_id"].tolist()]
 
 
+def select_paper_key_flights(metrics: pd.DataFrame, n_flights: int) -> list[int]:
+    if n_flights == 0:
+        return []
+    ranked = metrics.sort_values(
+        ["collective_influence", "flight_id"], ascending=[False, True], kind="stable"
+    )
+    return ranked.head(max(1, round(0.10 * n_flights)))["flight_id"].astype(int).tolist()
+
+
 def select_key_flights_for_coverage(
     metrics: pd.DataFrame,
     conflicts: list[Conflict],

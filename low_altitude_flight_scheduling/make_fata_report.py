@@ -66,6 +66,12 @@ def card(title: str, body: str) -> str:
 
 # ---------------------------------------------------------------- 读取数据
 m = read_csv("metrics_summary.csv")[0]
+if m.get("scheduler_mode") == "paper_strict":
+    from src.paper_consistency import write_paper_html_report
+
+    write_paper_html_report(OUT, m)
+    print(f"Paper-strict report: {REPORT}")
+    raise SystemExit(0)
 two_stage = read_csv("table_two_stage_vs_one_stage.csv")
 pso_ga = read_csv("table_pso_ga_fata.csv")
 orig_vs_imp = read_csv("table_original_vs_improved_fata.csv")

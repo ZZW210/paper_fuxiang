@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
 from typing import Callable
 
 import numpy as np
@@ -17,6 +18,141 @@ class FATAResult:
     convergence: list[float]
     remaining_conflicts: list[float]
     delay_count: list[float]
+
+
+@dataclass
+class PaperFATAResult(FATAResult):
+    best_context: np.ndarray | None
+
+
+_PAPER_WORKER_OBJECTIVE = None
+_PAPER_WORKER_CONTEXT_OBJECTIVE = None
+
+
+def _initialize_paper_worker(objective, context_objective):
+    global _PAPER_WORKER_OBJECTIVE, _PAPER_WORKER_CONTEXT_OBJECTIVE
+    _PAPER_WORKER_OBJECTIVE = objective
+    _PAPER_WORKER_CONTEXT_OBJECTIVE = context_objective
+
+
+def _paper_worker_evaluate(task):
+    vector, generation, context = task
+    if _PAPER_WORKER_CONTEXT_OBJECTIVE is not None:
+        return float(_PAPER_WORKER_CONTEXT_OBJECTIVE(vector, generation, context))
+    return float(_PAPER_WORKER_OBJECTIVE(vector, generation))
+
+
+def fata_optimize_paper(
+    objective_with_iter,
+    lb,
+    ub,
+    dim: int,
+    population: int = 50,
+    max_iter: int = 200,
+    seed: int = 2025,
+    parf: float = 0.2,
+    n_jobs: int = 8,
+    callback=None,
+    generation_context=None,
+    objective_with_context=None,
+    on_generation_evaluated=None,
+) -> PaperFATAResult:
+    """FATA.m MLF/LPS, with Eq.(48) initialization and a generation-aware objective.
+
+    Context hooks implement ADM without changing continuous position updates.
+    Only objective evaluation runs in workers; RNG and selection stay ordered.
+    """
+    if dim < 1 or population < 2 or max_iter < 1 or n_jobs < 1:
+        raise ValueError("Positive dimension, generations/jobs and population >= 2 required")
+    lower = np.broadcast_to(np.asarray(lb, dtype=float), (dim,)).copy()
+    upper = np.broadcast_to(np.asarray(ub, dtype=float), (dim,)).copy()
+    if np.any(lower > upper):
+        raise ValueError("Lower bounds exceed upper bounds")
+    rng = np.random.default_rng(seed)
+    flight = good_point_set(population, dim, lower, upper)
+    best_pos = flight[0].copy()
+    best_context = None
+    best_score = float("inf")
+    worst_integral, best_integral = 0.0, float("inf")
+    convergence, remaining, delays = [], [], []
+    executor = None
+    if n_jobs > 1:
+        executor = ProcessPoolExecutor(
+            max_workers=n_jobs, initializer=_initialize_paper_worker,
+            initargs=(objective_with_iter, objective_with_context),
+        )
+
+    def evaluate(tasks):
+        if executor is not None:
+            return list(executor.map(_paper_worker_evaluate, tasks))
+        return [float(objective_with_context(x, gen, context))
+                if objective_with_context is not None
+                else float(objective_with_iter(x, gen)) for x, gen, context in tasks]
+
+    try:
+        for generation in range(1, max_iter + 1):
+            flight = np.clip(flight, lower, upper)
+            contexts = generation_context(generation, population, rng) if generation_context else [None] * population
+            tasks = [(flight[i], generation, contexts[i]) for i in range(population)]
+            # The incumbent must be compared under this generation's delta too.
+            has_incumbent = np.isfinite(best_score)
+            if has_incumbent:
+                tasks.append((best_pos, generation, best_context))
+            scores = np.asarray(evaluate(tasks), dtype=float)
+            fitness = scores[:population]
+            if has_incumbent:
+                best_score = float(scores[-1])
+            for i in range(population):
+                if fitness[i] < best_score:
+                    best_score = float(fitness[i])
+                    best_pos = flight[i].copy()
+                    best_context = None if contexts[i] is None else np.array(contexts[i], copy=True)
+            if on_generation_evaluated:
+                on_generation_evaluated(generation, flight.copy(), fitness.copy(), contexts)
+            convergence.append(best_score)
+            if callback and np.isfinite(best_score):
+                info = callback(best_pos.copy(), best_score, generation, best_context)
+                remaining.append(float(info.get("remaining_conflicts", np.nan)))
+                delays.append(float(info.get("delay_count", np.nan)))
+
+            if generation == max_iter:
+                break  # FATA.m's final unevaluated update cannot change its result.
+            finite = fitness[np.isfinite(fitness)]
+            if not len(finite):
+                for i in range(population):
+                    flight[i] = lower + rng.random() * (upper - lower)
+                continue
+            # Invalid routes have infinite fitness, not an added objective penalty.
+            # A finite sentinel is used only to keep the MLF integral well defined.
+            quality = np.where(np.isfinite(fitness), fitness, max(finite) + max(1.0, abs(max(finite))))
+            order = np.sort(quality)
+            integral = float(np.trapezoid(order))
+            worst_integral = max(worst_integral, integral)
+            best_integral = min(best_integral, integral)
+            eps = np.finfo(float).eps
+            ip = (integral - worst_integral) / (best_integral - worst_integral + eps)
+            a = np.tan(1.0 - generation / max_iter)
+            b = 1.0 / a
+            worst = float(order[-1])
+            for i in range(population):
+                para1 = a * rng.random(dim) - a * rng.random(dim)
+                para2 = b * rng.random(dim) - b * rng.random(dim)
+                p = (quality[i] - worst) / (best_score - worst + eps)
+                if rng.random() > ip:
+                    # FATA.m uses scalar rand here (the same fraction in all axes).
+                    flight[i] = (upper - lower) * rng.random() + lower
+                else:
+                    for j in range(dim):
+                        num = int(np.floor(rng.random() * population))
+                        if rng.random() < p:
+                            flight[i, j] = best_pos[j] + flight[i, j] * para1[j]
+                        else:
+                            flight[i, j] = flight[num, j] + para2[j] * flight[i, j]
+                            flight[i, j] = 0.5 * (parf + 1.0) * (lower[j] + upper[j]) - parf * flight[i, j]
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
+    return PaperFATAResult(best_pos, best_score, convergence, remaining, delays, best_context)
 
 
 def _is_prime(n: int) -> bool:

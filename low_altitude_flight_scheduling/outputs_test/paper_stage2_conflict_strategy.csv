@@ -1,0 +1,2 @@
+conflict_id,plan_a,plan_b,cell_x,cell_y,cell_z,P_schedule,P_speed,P_reroute,selected_strategy,target_flight
+0,3,16,34,29,1,2.5165055224836883e-15,2.960594732333751e-16,0.9999999999999972,rerouting,3

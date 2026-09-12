@@ -40,6 +40,16 @@ class FlightPlan:
     goal_level: int | None = None
     cruise_level: int | None = None
     altitude_profile: dict[str, int] | None = None
+    scheduled_etd: float | None = None
+    paper_strategy: int | None = None
+
+    @property
+    def atd(self) -> float:
+        return self.etd
+
+    @atd.setter
+    def atd(self, value: float) -> None:
+        self.etd = float(value)
 
     def copy(self) -> "FlightPlan":
         return copy.deepcopy(self)

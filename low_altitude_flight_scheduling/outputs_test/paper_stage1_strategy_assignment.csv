@@ -1,0 +1,3 @@
+flight_id,CI_rank,strategy,ATD,changed_segments,rerouted,fitness
+0,1,speed,982.9023324000046,59,False,0.8326328513557257
+1,2,speed,436.28029291521955,59,False,0.8326328513557257

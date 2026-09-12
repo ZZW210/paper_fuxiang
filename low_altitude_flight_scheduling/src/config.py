@@ -93,6 +93,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "conflict_spatial_buffer_cells": 0,
     },
     "optimization": {
+        "scheduler_mode": "paper_strict",
+        "n_jobs": 8,
+        "legacy_stage1_key_ratio": 0.15,
+        "legacy_stage1_key_selection_mode": "coverage_adaptive",
+        "legacy_NP": 40,
         "x_range": [1, 60],
         "y_range": [1, 60],
         "z_range": [1, 4],
@@ -176,7 +181,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "fata": {
         "Parf": 0.2,
-        "NP": 40,
+        "NP": 50,
+        "Ngen_max_stage1": 200,
+        "Ngen_max_stage2": 200,
         "Ngen_max": 120,
         "omega_c": 0.8,
         "omega_d": 0.25,
@@ -188,6 +195,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "comparison_improved_restarts": 2,
         "quick_repeats": 3,
     },
+    "adm": {"learning_rate": 0.5, "dominant_fraction": 0.20},
+    "paper_encoding": {"local_window_segments": 4},
     "network": {"ci_l": 2, "top_k": 10},
     "visualization": {
         "show_ground_start_goal": True,
@@ -248,11 +257,19 @@ def load_config(path: str | Path = "config.yaml", overrides: dict[str, Any] | No
         cfg = deep_update(cfg, loaded)
     if overrides:
         cfg = deep_update(cfg, overrides)
+    if cfg["optimization"].get("scheduler_mode") == "paper_strict":
+        cfg["optimization"]["stage1_key_ratio"] = 0.10
+        cfg["optimization"]["stage1_key_selection_mode"] = "fixed_ci"
     return cfg
 
 
 def apply_quick_overrides(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = copy.deepcopy(cfg)
+    if cfg["optimization"].get("scheduler_mode") == "paper_strict":
+        cfg["fata"]["NP"] = 20
+        cfg["fata"]["Ngen_max_stage1"] = 50
+        cfg["fata"]["Ngen_max_stage2"] = 50
+        return cfg
     cfg["fata"]["NP"] = min(int(cfg["fata"]["NP"]), 20)
     cfg["fata"]["Ngen_max"] = min(int(cfg["fata"]["Ngen_max"]), 50)
     cfg["fata"]["quick_repeats"] = 3

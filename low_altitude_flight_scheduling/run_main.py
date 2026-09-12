@@ -56,6 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--n-flights", type=int, default=None)
     parser.add_argument("--outputs", default="outputs")
+    parser.add_argument("--scheduler-mode", choices=["paper_strict", "legacy_engineering"], default=None)
+    parser.add_argument("--n-jobs", type=int, default=None)
     return parser.parse_args()
 
 
@@ -186,12 +188,28 @@ def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parent
     cfg = load_config(root / args.config)
+    if args.scheduler_mode is not None:
+        cfg = load_config(root / args.config, {"optimization": {"scheduler_mode": args.scheduler_mode}})
+    if cfg["optimization"]["scheduler_mode"] == "legacy_engineering":
+        opt = cfg["optimization"]
+        opt["stage1_key_ratio"] = opt.get("legacy_stage1_key_ratio", opt["stage1_key_ratio"])
+        opt["stage1_key_selection_mode"] = opt.get("legacy_stage1_key_selection_mode", opt["stage1_key_selection_mode"])
+        cfg["fata"]["NP"] = opt.get("legacy_NP", cfg["fata"]["NP"])
+    if args.n_jobs is not None:
+        cfg["optimization"]["n_jobs"] = args.n_jobs
     if args.quick:
         cfg = apply_quick_overrides(cfg)
     if args.n_flights is not None:
         cfg["flight"]["n_flights"] = int(args.n_flights)
         cfg.setdefault("flight_generation", {})["n_flights"] = int(args.n_flights)
     cfg["flight"]["random_seed"] = int(args.seed)
+    if cfg["optimization"]["scheduler_mode"] == "paper_strict":
+        from src.paper_scheduler import run_paper_main
+
+        run_paper_main(cfg, args, root)
+        return
+    if cfg["optimization"]["scheduler_mode"] != "legacy_engineering":
+        raise ValueError("Unknown scheduler mode")
     set_random_seed(args.seed)
     out = ensure_dir(root / args.outputs)
     reset_conflict_detection_stats()

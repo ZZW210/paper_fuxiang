@@ -82,6 +82,8 @@ conflict:
   conflict_spatial_buffer_cells: 0
 
 optimization:
+  scheduler_mode: "paper_strict"
+  n_jobs: 8
   x_range: [1, 60]
   y_range: [1, 60]
   z_range: [1, 4]
@@ -98,10 +100,12 @@ optimization:
   quick_max_runtime_seconds: 60
   max_local_reroute_attempts: 20
   accept_only_if_global_conflicts_decrease: true
-  # Preserve the paper's stage-1 reduction ratio on the synthetic network by
-  # expanding the CI key set until it covers enough weighted conflict points.
-  stage1_key_ratio: 0.15
-  stage1_key_selection_mode: "coverage_adaptive"
+  # Legacy engineering options below are ignored by paper_strict.
+  stage1_key_ratio: 0.10
+  stage1_key_selection_mode: "fixed_ci"
+  legacy_stage1_key_ratio: 0.15
+  legacy_stage1_key_selection_mode: "coverage_adaptive"
+  legacy_NP: 40
   stage1_conflict_coverage_target: 0.82
   stage1_max_key_ratio: 0.25
   stage1_decision_mode: "continuous_atd_speed"
@@ -166,7 +170,9 @@ risk:
 
 fata:
   Parf: 0.2
-  NP: 40
+  NP: 50
+  Ngen_max_stage1: 200
+  Ngen_max_stage2: 200
   Ngen_max: 120
   omega_c: 0.8
   omega_d: 0.25
@@ -181,6 +187,14 @@ fata:
 network:
   ci_l: 2
   top_k: 10
+
+adm:
+  learning_rate: 0.5
+  dominant_fraction: 0.20
+
+paper_encoding:
+  # Implementation assumption: radius in path indices, not a candidate list.
+  local_window_segments: 4
 
 visualization:
   show_ground_start_goal: true
