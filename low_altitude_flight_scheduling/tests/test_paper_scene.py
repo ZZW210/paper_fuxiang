@@ -10,6 +10,7 @@ from src.conflict_network import collective_influence, build_conflict_network, s
 from src.flight_plan import FlightPlan, generate_paper_random_flight_tasks
 from src.grid import AirspaceGrid
 from src.scene_diagnostics import analyze_initial_conflict_network, calibration_score, write_calibration_report
+from extend_key_ratio_analysis import build_extended_table
 
 
 def test_paper_random_fixed_conditions_and_reproducibility():
@@ -39,6 +40,21 @@ def test_paper_random_fixed_conditions_and_reproducibility():
 def test_paper_ci_ratio_uses_important_ratio_only(ratio, expected):
     metrics = pd.DataFrame({"flight_id": range(100), "collective_influence": range(100)})
     assert len(select_paper_key_flights(metrics, 100, ratio)) == expected
+
+
+def test_extended_ratio_table_reports_required_stage_metrics():
+    raw = pd.DataFrame([dict(key_ratio=.13, K=13, key_conflict_point_coverage=.6,
+                             stage1_remaining_conflicts=5, remaining_conflicts=2,
+                             delayed_flight_count=3, total_changed_flights=5, final_fitness=10,
+                             risk_increase_percent=.2, stage1_dimension=20, stage2_dimension=30),
+                        dict(key_ratio=.13, K=13, key_conflict_point_coverage=.6,
+                             stage1_remaining_conflicts=3, remaining_conflicts=0,
+                             delayed_flight_count=4, total_changed_flights=6, final_fitness=8,
+                             risk_increase_percent=.1, stage1_dimension=20, stage2_dimension=25)])
+    result = build_extended_table(raw).iloc[0]
+    assert result["zero_conflict_success_rate"] == .5
+    assert result["stage1_remaining_conflicts_mean"] == 4
+    assert result["final_remaining_conflicts_mean"] == 1
 
 
 def test_diagnostics_counts_events_and_unique_pair_cells(tmp_path):

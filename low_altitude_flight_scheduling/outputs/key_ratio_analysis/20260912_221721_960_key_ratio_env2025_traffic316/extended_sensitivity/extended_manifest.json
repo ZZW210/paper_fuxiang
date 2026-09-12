@@ -1,0 +1,27 @@
+{
+  "base_analysis": "D:\\Desktop\\paper_fuxiang\\low_altitude_flight_scheduling\\outputs\\key_ratio_analysis\\20260912_221721_960_key_ratio_env2025_traffic316",
+  "environment_seed": 2025,
+  "traffic_seed": 316,
+  "initial_deterministic_conflicts": 53,
+  "initial_uncertain_conflicts": 107,
+  "extended_ratios": [
+    0.13,
+    0.14,
+    0.15,
+    0.16,
+    0.17,
+    0.18,
+    0.2,
+    0.22,
+    0.25
+  ],
+  "repeats": 3,
+  "optimizer_seeds": [
+    0,
+    1,
+    2
+  ],
+  "n_jobs": 8,
+  "scope": "reproduction-specific extended sensitivity analysis",
+  "total_runtime_sec": 1623.4131352999975
+}
