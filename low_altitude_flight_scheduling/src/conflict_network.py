@@ -85,13 +85,16 @@ def select_key_flights(metrics: pd.DataFrame, important_ratio: float, n_flights:
     return [int(v) for v in ranked.head(k)["flight_id"].tolist()]
 
 
-def select_paper_key_flights(metrics: pd.DataFrame, n_flights: int) -> list[int]:
+def select_paper_key_flights(metrics: pd.DataFrame, n_flights: int, important_ratio: float = 0.10) -> list[int]:
+    """Select a fixed CI-ranked prefix for paper_strict experiments."""
     if n_flights == 0:
         return []
+    if not 0 < float(important_ratio) <= 1:
+        raise ValueError("important_ratio must lie in (0, 1]")
     ranked = metrics.sort_values(
         ["collective_influence", "flight_id"], ascending=[False, True], kind="stable"
     )
-    return ranked.head(max(1, round(0.10 * n_flights)))["flight_id"].astype(int).tolist()
+    return ranked.head(max(1, round(float(important_ratio) * n_flights)))["flight_id"].astype(int).tolist()
 
 
 def select_key_flights_for_coverage(

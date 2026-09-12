@@ -1,0 +1,125 @@
+{
+  "scan_id": "20260912_215351_529_traffic_scan_env2025_seed0-499_48352cd1",
+  "status": "completed",
+  "start_time": "2026-09-12T21:53:51.539829+08:00",
+  "environment_seed": 2025,
+  "traffic_seed_start": 0,
+  "traffic_seed_end": 499,
+  "n_jobs": 8,
+  "git_commit": "48352cd19275e4ff5916ba21e721984e770cbd84",
+  "git_dirty": true,
+  "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "cpu_count": 20,
+  "blas_threads": {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1"
+  },
+  "environment_initialization": "parent once; each Windows worker regenerates once and asserts the same hashes",
+  "hashes": {
+    "building_map_hash": "a4eb9cdd46eb259e1795ed48c756aecaba6cd1a3b2cf8ab5374fa12fc0a484e0",
+    "population_map_hash": "4f306a7f9a118b18d48fd7d9bb27f87a01130535f64d2507476f70f1a01a19bc",
+    "risk_map_hash": "0471516851a9f1ef875d4bfd826c70b57813a74ceb42ad230df578e654c6e0c6",
+    "environment_hash": "46cecb577e1256b624e483d5e505062bee0bb0aa4445a4045552c35fff2a063d"
+  },
+  "population_model": "reference28_gravity",
+  "population": {
+    "window_size": 10,
+    "min_center_spacing_m": 1000,
+    "n_population_centers": 4,
+    "beta": 2.0,
+    "beta_sensitivity": [
+      1.0,
+      2.0,
+      4.0
+    ]
+  },
+  "astar_distance_scale_mode": "meter",
+  "paper_scene": {
+    "generation_mode": "paper_random",
+    "n_flights": 100,
+    "distance_target_m": 6000,
+    "distance_tolerance_m": 1200,
+    "takeoff": {
+      "mode": "uniform",
+      "min": 0,
+      "max": 1800
+    },
+    "initial_speed": {
+      "mode": "constant",
+      "value": 10.0
+    },
+    "astar": {
+      "risk_weight": 0.8,
+      "distance_weight": 0.2,
+      "use_altitude_preference": false,
+      "use_route_random_bias": false,
+      "use_forced_corridor": false
+    },
+    "conflict": {
+      "t_conflict": 30,
+      "alpha": 0.05
+    }
+  },
+  "conflict": {
+    "t_conflict": 30,
+    "cell_occupancy_time": 0.0,
+    "alpha": 0.05,
+    "sigma0": 1.0,
+    "sigma_rate": 0.01,
+    "conflict_spatial_buffer_cells": 0
+  },
+  "network": {
+    "ci_l": 2,
+    "top_k": 10
+  },
+  "optimizers_executed": false,
+  "end_time": "2026-09-12T21:56:12.773171+08:00",
+  "total_runtime_sec": 141.24315139999817,
+  "completed": 500,
+  "failures": 0,
+  "candidate_detail_seeds": [
+    3,
+    12,
+    17,
+    42,
+    50,
+    58,
+    74,
+    84,
+    85,
+    90,
+    98,
+    106,
+    112,
+    158,
+    161,
+    167,
+    174,
+    186,
+    215,
+    232,
+    244,
+    257,
+    266,
+    281,
+    309,
+    316,
+    331,
+    343,
+    370,
+    383,
+    387,
+    392,
+    393,
+    399,
+    440,
+    448,
+    461,
+    471,
+    483,
+    494
+  ]
+}

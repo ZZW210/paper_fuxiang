@@ -35,6 +35,12 @@ def test_paper_random_fixed_conditions_and_reproducibility():
     assert legacy['conflict']['t_conflict'] == 20
 
 
+@pytest.mark.parametrize(("ratio", "expected"), [(0.03, 3), (0.10, 10), (0.12, 12)])
+def test_paper_ci_ratio_uses_important_ratio_only(ratio, expected):
+    metrics = pd.DataFrame({"flight_id": range(100), "collective_influence": range(100)})
+    assert len(select_paper_key_flights(metrics, 100, ratio)) == expected
+
+
 def test_diagnostics_counts_events_and_unique_pair_cells(tmp_path):
     path = [(0, 0, 0), (1, 0, 0)]
     plans = [FlightPlan(i, path[0], path[-1], path, 0, [0, 10], [10], 0, 10) for i in range(12)]

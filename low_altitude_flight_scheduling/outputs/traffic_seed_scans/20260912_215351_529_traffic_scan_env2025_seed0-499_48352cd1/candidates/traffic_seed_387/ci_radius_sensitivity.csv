@@ -1,0 +1,4 @@
+run_id,ci_l,top10_flight_ids,top10_point_coverage,top10_pair_coverage,remaining_edges_after_top10_removal,lcc_ratio_after_top10_removal
+20260912_215351_529_traffic_scan_env2025_seed0-499_48352cd1,1,"[17, 12, 14, 39, 32, 90, 18, 43, 53, 86]",0.39,0.42028985507246375,40,0.14
+20260912_215351_529_traffic_scan_env2025_seed0-499_48352cd1,2,"[14, 12, 17, 39, 32, 18, 53, 43, 96, 90]",0.39,0.42028985507246375,40,0.14
+20260912_215351_529_traffic_scan_env2025_seed0-499_48352cd1,3,"[14, 90, 39, 12, 17, 43, 86, 15, 18, 53]",0.36,0.43478260869565216,39,0.12

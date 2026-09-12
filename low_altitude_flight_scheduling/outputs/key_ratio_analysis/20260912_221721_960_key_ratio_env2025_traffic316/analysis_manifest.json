@@ -1,0 +1,37 @@
+{
+  "analysis_id": "20260912_221721_960_key_ratio_env2025_traffic316",
+  "environment_seed": 2025,
+  "traffic_seed": 316,
+  "ratios": [
+    0.03,
+    0.04,
+    0.05,
+    0.06,
+    0.07,
+    0.08,
+    0.09,
+    0.1,
+    0.11,
+    0.12
+  ],
+  "repeats": 3,
+  "optimizer_seeds": [
+    0,
+    1,
+    2
+  ],
+  "n_jobs": 8,
+  "initial_deterministic_conflicts": 53,
+  "initial_uncertain_conflicts": 107,
+  "obstacle_hash": "a4eb9cdd46eb259e1795ed48c756aecaba6cd1a3b2cf8ab5374fa12fc0a484e0",
+  "risk_map_hash": "0471516851a9f1ef875d4bfd826c70b57813a74ceb42ad230df578e654c6e0c6",
+  "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "parameters": {
+    "NP": 50,
+    "Ngen": 200,
+    "Parf": 0.2
+  },
+  "status": "completed",
+  "total_runtime_sec": 1635.4655397000024
+}

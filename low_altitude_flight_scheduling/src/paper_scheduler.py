@@ -233,7 +233,8 @@ def run_paper_main(cfg, args, root: Path):
     graph = build_conflict_network(plans, conflicts)
     metrics = network_metrics(graph, ci_l=cfg["network"]["ci_l"])
     ranked = metrics.sort_values(["collective_influence", "flight_id"], ascending=[False, True], kind="stable")
-    key_ids = select_paper_key_flights(metrics, len(plans))
+    # paper_strict uses only this ratio; stage1_key_ratio is legacy-engineering configuration.
+    key_ids = select_paper_key_flights(metrics, len(plans), cfg["optimization"]["important_ratio"])
     attacks = run_attack_suite(graph, metrics)
     write_network_outputs(graph, ranked, attacks, out)
     print(f"Initial conflicts: {len(conflicts)}", flush=True)
