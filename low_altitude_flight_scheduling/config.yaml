@@ -1,3 +1,86 @@
+scene_mode: "paper_strict_random"
+
+paper_scene:
+  generation_mode: "paper_random"
+  n_flights: 100
+  distance_target_m: 6000
+  distance_tolerance_m: 1200
+  takeoff:
+    mode: "uniform"
+    min: 0
+    max: 1800
+  initial_speed:
+    mode: "constant"
+    value: 10.0
+  astar:
+    risk_weight: 0.8
+    distance_weight: 0.2
+    use_altitude_preference: false
+    use_route_random_bias: false
+    use_forced_corridor: false
+  conflict:
+    t_conflict: 30
+    alpha: 0.05
+
+legacy_scene:
+  flight_generation:
+    mode: "heterogeneous_random"
+    n_flights: 100
+    distance_target_m: 6000
+    distance_tolerance_m: 1500
+    max_sampling_attempts: 30000
+    od_pattern:
+      hotspot_count: 10
+      hotspot_std_cells: 6.5
+      hub_to_hub_ratio: 0.45
+      edge_to_edge_ratio: 0.25
+      center_crossing_ratio: 0.15
+      pure_random_ratio: 0.15
+      center_bias_strength: 0.25
+    takeoff_time:
+      mode: "mixture_peaks"
+      window: [0, 1800]
+      peak_centers: [350, 800, 1250]
+      peak_stds: [150, 220, 180]
+      peak_weights: [0.25, 0.50, 0.25]
+      uniform_noise_ratio: 0.20
+    speed:
+      mode: "heterogeneous"
+      mean: 10.0
+      std: 1.2
+      min: 7.0
+      max: 14.0
+    altitude:
+      ground_level: 0
+      force_ground_start_goal: true
+      cruise_level_probs: [0.05, 0.35, 0.45, 0.15]
+      force_cruise_altitude: true
+      min_cruise_fraction: 0.65
+      climb_descent_cells: 3
+    route_overlap:
+      encourage_overlap: true
+      shared_corridor_ratio: 0.12
+      corridor_width_cells: 6
+      corridor_count: 4
+      use_multiple_corridors: true
+  astar:
+    vertical_move_penalty: 1.8
+    altitude_preference_enabled: true
+    cruise_altitude_penalty_weight: 0.35
+    ground_hugging_penalty_weight: 0.8
+    min_preferred_level: 1
+    max_preferred_level: 3
+    risk_weight: 0.65
+    distance_weight: 0.35
+  conflict:
+    t_conflict: 20.0
+    cell_occupancy_time: 0.0
+    alpha: 0.05
+    sigma0: 1.0
+    sigma_rate: 0.010
+    conflict_spatial_buffer_cells: 0
+
+# Top-level engineering sections remain for compatibility with existing APIs.
 airspace:
   physical_size: [6000, 6000, 120]
   grid_cell_size: [100, 100, 30]

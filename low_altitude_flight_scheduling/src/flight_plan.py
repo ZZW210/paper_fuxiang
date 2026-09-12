@@ -929,7 +929,7 @@ def generate_initial_flight_plans(seed: int = 2025, n_flights: int | None = None
     from .risk_map import generate_risk_map
 
     root = Path(__file__).resolve().parents[1]
-    cfg = load_config(root / "config.yaml")
+    cfg = load_config(root / "config.yaml", {"optimization": {"scheduler_mode": "legacy_engineering"}})
     cfg["flight"]["random_seed"] = int(seed)
     if n_flights is not None:
         cfg["flight"]["n_flights"] = int(n_flights)
@@ -939,7 +939,65 @@ def generate_initial_flight_plans(seed: int = 2025, n_flights: int | None = None
     return generate_flight_plans(grid, risk_map, cfg, output_dir=output_dir, n_flights=n_flights, seed=seed)
 
 
+def generate_paper_random_flight_tasks(
+    grid: AirspaceGrid, risk_map: np.ndarray, cfg: dict,
+    output_dir: str | Path | None = None, n_flights: int | None = None,
+    seed: int | None = None,
+) -> list[FlightPlan]:
+    scene = cfg.get("paper_scene", {})
+    fg = cfg["flight_generation"]
+    n = int(n_flights if n_flights is not None else fg.get("n_flights", 100))
+    rng = np.random.default_rng(int(seed if seed is not None else cfg["flight"]["random_seed"]) + 101)
+    target = float(fg.get("distance_target_m", 6000))
+    tolerance = float(fg.get("distance_tolerance_m", 1200))
+    takeoff = scene.get("takeoff", {"min": 0, "max": 1800})
+    speed = float(scene.get("initial_speed", {}).get("value", 10.0))
+    weights = scene.get("astar", {})
+    plans = []
+    for plan_id in range(n):
+        for _ in range(int(fg.get("max_sampling_attempts", 30000))):
+            start = (int(rng.integers(grid.shape[0])), int(rng.integers(grid.shape[1])), 0)
+            goal = (int(rng.integers(grid.shape[0])), int(rng.integers(grid.shape[1])), 0)
+            if not grid.is_free(start) or not grid.is_free(goal):
+                continue
+            if abs(_cell_distance_m(start, goal, grid) - target) > tolerance:
+                continue
+            path = astar_path(grid, start, goal, risk_map,
+                              alpha_r=float(weights.get("risk_weight", 0.8)),
+                              alpha_l=float(weights.get("distance_weight", 0.2)),
+                              distance_unit_m=1.0)
+            if path:
+                break
+        else:
+            raise RuntimeError(f"Paper random OD/path sampling exhausted for flight {plan_id}; tolerance unchanged")
+        etd = float(rng.uniform(float(takeoff["min"]), float(takeoff["max"])))
+        eta = compute_eta_times(path, etd, speed, grid.cell_size)
+        plans.append(FlightPlan(
+            id=plan_id, start=start, goal=goal, path=path, etd=etd, eta_times=eta,
+            speed_profile=[speed] * (len(path) - 1), risk_sum=float(sum(risk_map[p] for p in path)),
+            total_air_time=eta[-1] - etd, generation_mode="paper_random",
+            start_ground=start, goal_ground=goal, start_level=0, goal_level=0,
+            cruise_level=max(p[2] for p in path), scheduled_etd=etd,
+        ))
+    _validate_grounded_flight_plans(plans)
+    if output_dir is not None:
+        out = ensure_dir(output_dir)
+        with (out / "initial_plans.pkl").open("wb") as fh:
+            pickle.dump(plans, fh)
+        _write_generation_diagnostics(out, grid, plans, np.empty((0, 2)), [])
+        from .conflict_detection import detect_conflicts
+        from .scene_diagnostics import analyze_initial_conflict_network
+        analyze_initial_conflict_network(
+            plans, detect_conflicts(plans, cfg, uncertain=True), detect_conflicts(plans, cfg, uncertain=False),
+            int(seed if seed is not None else cfg["flight"]["random_seed"]),
+            cfg.get("run", {}).get("run_id", "unarchived"), out,
+        )
+    return plans
+
+
 def generate_flight_plans(grid: AirspaceGrid, risk_map: np.ndarray, cfg: dict, output_dir: str | Path | None = None, n_flights: int | None = None, seed: int | None = None) -> list[FlightPlan]:
+    if cfg.get("flight_generation", {}).get("mode") == "paper_random":
+        return generate_paper_random_flight_tasks(grid, risk_map, cfg, output_dir, n_flights, seed)
     if cfg.get("flight_generation", {}).get("mode") == "heterogeneous_random":
         return generate_heterogeneous_flight_tasks(grid, risk_map, cfg, output_dir, n_flights=n_flights, seed=seed)
 

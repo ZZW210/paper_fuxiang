@@ -1,0 +1,8 @@
+metric,current_heterogeneous,paper_random,paper_reference
+uncertain_conflict_points,130.0,123.0,97.0
+deterministic_conflict_points,99.0,74.0,53.0
+CI_top10_point_coverage,0.24615384615384617,0.36585365853658536,0.8041237113402062
+CI_top10_pair_coverage,0.3411764705882353,0.38095238095238093,
+network_edges,85.0,84.0,
+degree_gini,0.35788235294117654,0.44678571428571434,
+unique_pair_cell_conflicts,130.0,123.0,

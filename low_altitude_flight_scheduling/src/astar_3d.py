@@ -31,6 +31,7 @@ def astar_path(
     cost_bias_map: np.ndarray | None = None,
     cost_bias_weight: float = 0.0,
     max_expansions: int = 80000,
+    distance_unit_m: float = 100.0,
 ) -> list[GridPoint]:
     """Improved 3D A* with risk-length cost and distance-dependent heuristic weight."""
     if not grid.is_free(start, forbidden) or not grid.is_free(goal, forbidden):
@@ -61,7 +62,7 @@ def astar_path(
         for neighbor in grid.neighbors_26(current, forbidden):
             if neighbor in visited:
                 continue
-            move = euclidean(current, neighbor, grid.cell_size) / 100.0
+            move = euclidean(current, neighbor, grid.cell_size) / distance_unit_m
             if neighbor[2] != current[2]:
                 move *= max(1.0, float(vertical_move_penalty))
             risk_cost = float(risk[neighbor])
@@ -76,7 +77,7 @@ def astar_path(
             if tentative < g_score.get(neighbor, float("inf")):
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative
-                h = euclidean(neighbor, goal, grid.cell_size) / 100.0
+                h = euclidean(neighbor, goal, grid.cell_size) / distance_unit_m
                 w = 1.0 + euclidean(neighbor, goal, grid.cell_size) / start_goal_dist
                 counter += 1
                 heapq.heappush(open_heap, (tentative + w * h, counter, neighbor))

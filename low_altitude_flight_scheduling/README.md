@@ -2,7 +2,7 @@
 
 本项目复现论文《基于复杂网络的城市低空飞行计划优化调度》的主要算法流程：三维栅格空域、城市低空第三方风险地图、改进 A* 四维飞行计划生成、考虑过点时间不确定性的冲突探测、冲突复杂网络关键飞行计划识别、多策略两阶段优化，以及原始/改进 FATA、PSO、GA 对比。
 
-这是算法级复现，不是作者私有随机数据的逐点复刻。论文未公开完整仿真数据、随机种子、障碍物生成、人口密度细节和过点时间误差函数，因此本项目使用可配置随机城市与交通脉冲生成器，并在 `outputs/calibration_report.md` 中记录默认冲突数与论文现象的差异。
+这是算法级复现，不是作者私有随机数据的逐点复刻。论文未公开完整仿真数据、随机种子、障碍物生成、人口密度细节和过点时间误差函数。严格初始场景使用论文条件下的随机 OD、均匀起飞时间和统一速度；交通脉冲仅属于工程模式。初始网络差异记录在 `outputs/initial_network_reproduction_report.md`。
 
 ## 安装与运行
 
@@ -102,7 +102,7 @@ normal默认`Parf=.2, NP=50`，两阶段各200代，权重`wc=.8, wd=.25, wr=.5,
 
 冲突探测中，不考虑不确定性使用同一栅格过点时间差 `|t_a - t_b| <= t_conflict`。考虑不确定性时，`t_ETA ~ Normal(mu_t, sigma_t^2)`，默认 `sigma_t = sigma0 + sigma_rate * elapsed_time`，并用正态置信区间扩展安全时间间隔。
 
-默认采用地面起降与空域巡航分离机制：飞行计划的起点和终点固定在 `z=0` 地面层，巡航层按 `flight_generation.altitude.cruise_level_probs` 随机采样。可视化中航迹线使用栅格中心高度，`z=0/1/2/3` 分别显示为空域格点中心约 15/45/75/105 m；起终点 marker 单独画在 0 m 地面高度。
+工程模式采用地面起降与空域巡航分离机制：飞行计划的起点和终点固定在 `z=0` 地面层，巡航层按 `flight_generation.altitude.cruise_level_probs` 随机采样。严格初始场景由 A* 自行决定航迹层，不施加高度偏好。可视化中航迹线使用栅格中心高度，`z=0/1/2/3` 分别显示为空域格点中心约 15/45/75/105 m；起终点 marker 单独画在 0 m 地面高度。
 
 严格模式默认按打印式(51)计算raw目标；初始尺度归一化仅用于明确标记的对照实验。旧legacy模式保留初始尺度归一化及`risk_increase_ratio`暴露风险指标。两种严格尺度都按打印式(50)加入电池超限和延后计划数罚项，不以实验现象增加硬约束。
 
@@ -125,10 +125,70 @@ normal默认`Parf=.2, NP=50`，两阶段各200代，权重`wc=.8, wd=.25, wr=.5,
 
 结果不是硬编码论文表格，而是由当前随机种子、配置和算法运行计算得到。
 
-## 非均匀初始飞行计划生成
+## 非均匀初始飞行计划生成（仅 Legacy Engineering）
 
 论文没有公开原始 OD 生成代码，因此本项目采用“非均匀随机热点 OD 模型”来模拟城市低空交通中的物流站点、服务热点和中心穿越流量。该模型不使用完全均匀随机采样、网格分层采样或 Latin Hypercube，也不人为保证各区域飞行计划数量均衡。
 
-默认配置 `flight_generation.mode=heterogeneous_random` 会生成热点 OD、时间高峰、异质速度和中心走廊重叠航迹：约 55% 航班在热点之间飞行，约 25% 从边缘穿越中心区域，约 20% 保留背景随机流量；起飞时间由多个高斯峰和少量均匀噪声组成。该方法比均匀随机更接近论文仿真图中表现出的冲突不均匀、中心区域航迹密集和连续重叠航段现象。
+工程配置 `flight_generation.mode=heterogeneous_random` 会生成热点 OD、时间高峰、异质速度和中心走廊重叠航迹。这属于工程扩展，不能当作论文严格随机初始场景，也不能仅凭图形相似宣称更接近作者场景。
 
 相关诊断输出包括 `outputs/od_points.png`、`outputs/takeoff_time_hist.png`、`outputs/route_density_heatmap.png`、`outputs/route_length_hist.png` 和 `outputs/flight_generation_report.csv`。若 `route_density_gini < 0.25`，程序会提示航迹仍过于均衡，可提高 `center_bias_strength` 或 `hotspot_std_cells`。
+
+## Paper Random Initial Scenes
+
+`paper_strict` resolves the scene settings from `paper_scene`, using
+`flight_generation.mode=paper_random`. `legacy_engineering` resolves
+`legacy_scene.flight_generation`, `.astar`, and `.conflict`; missing legacy
+sections inherit the engineering sections of config.yaml. The convenience
+`generate_initial_flight_plans()` helper continues to generate engineering
+scenes; paper callers use `generate_flight_plans()` with strict config.
+
+The paper scene has 100 random ground OD pairs, uniform ETD in [0,1800]s,
+constant speed 10m/s, risk/distance A* weights 0.8/0.2, conflict threshold
+30s and alpha=0.05. Initial A* uses meter distances in g and h without
+altitude penalties, random biases, forced corridors or waypoints.
+
+Implementation assumption: "about 6km" is interpreted as 6000 +/- 1200m.
+OD cell centers are sampled uniformly then rejected if occupied, outside
+the fixed distance band or disconnected. Tolerance is never relaxed to fit
+conflict counts. z=0 is the ground terminal index; airspace cell centers
+remain at (z+0.5)*30m. No new altitude preference is imposed.
+City/population generation, sigma0=1 and sigma_rate=0.01 remain assumptions;
+sigma is unchanged. CI radius l=2 is also an implementation assumption.
+
+Only initial scenes and diagnostics are run by these commands:
+
+```bash
+python analyze_paper_scene.py --seed 2025
+python scan_paper_scenes.py --seed-start 2020 --seed-end 2039 --n-jobs 8
+# Explicit optional calibration, based only on published initial statistics:
+python scan_paper_scenes.py --seed-start 2020 --seed-end 2039 --n-jobs 8 --scene-mode paper_calibrated
+```
+
+Seed ranges are inclusive. Each scan is isolated in
+`outputs/scene_scans/<scan_id>/` using the existing timestamp/mode/seed/commit
+run-id convention. The manifest records the full config and all candidates;
+each seed has its own diagnostics, initial plans, obstacle/risk arrays and
+conflict CSVs. FATA/ADM are never executed by these tools.
+
+`paper_strict_random` reports the requested seed without selecting another.
+`paper_calibrated` selects a complete candidate seed using
+`abs(det-53)/53 + abs(unc-97)/97 + abs(point_coverage-78/97)` and writes
+`scene_calibration_report.md`. Final optimization results are never used.
+The selected candidate's `scene_config.json`, arrays and initial pickle
+record the replayable scene; use its seed explicitly for later scheduling.
+It is a calibrated reproduction scene, not the exact original scene.
+
+CI uses the unweighted simple graph and the exact l-hop boundary formula,
+with fixed Top10 and flight-id tie breaking. Raw point coverage counts each
+event once if either endpoint is selected. Pair coverage is separate.
+Diagnostics also report unique (unordered pair, cell) counts, extra repeated
+index events, degree concentration, and l=1/2/3 sensitivity without changing
+the default radius. Continuous segments use the existing adjacency predicate;
+only segments with more than one event enter the continuous-point ratio.
+Post-removal LCC ratios use the original number of plans as denominator.
+Top1/5/10 conflict shares count event unions, rather than summing duplicated
+endpoint contributions.
+
+The one-scene report compares the existing archived engineering paths
+recounted at the same 30s/sigma against paper_random. Its baseline source is
+recorded; absent baseline entries and undisclosed paper metrics stay blank.

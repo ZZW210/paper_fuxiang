@@ -258,9 +258,35 @@ def load_config(path: str | Path = "config.yaml", overrides: dict[str, Any] | No
         cfg = deep_update(cfg, loaded)
     if overrides:
         cfg = deep_update(cfg, overrides)
+    cfg["legacy_scene"] = deep_update({
+        "flight_generation": copy.deepcopy(cfg["flight_generation"]),
+        "astar": copy.deepcopy(cfg["astar"]),
+        "conflict": copy.deepcopy(cfg["conflict"]),
+    }, cfg.get("legacy_scene", {}))
     if cfg["optimization"].get("scheduler_mode") == "paper_strict":
+        scene = cfg["paper_scene"] = deep_update({
+            "generation_mode": "paper_random", "n_flights": 100,
+            "distance_target_m": 6000, "distance_tolerance_m": 1200,
+            "takeoff": {"mode": "uniform", "min": 0, "max": 1800},
+            "initial_speed": {"mode": "constant", "value": 10.0},
+            "astar": {"risk_weight": 0.8, "distance_weight": 0.2,
+                      "use_altitude_preference": False, "use_route_random_bias": False, "use_forced_corridor": False},
+            "conflict": {"t_conflict": 30.0, "alpha": 0.05},
+        }, cfg.get("paper_scene", {}))
+        cfg.setdefault("scene_mode", "paper_strict_random")
+        cfg["flight_generation"].update(
+            mode=scene.get("generation_mode", "paper_random"),
+            n_flights=scene.get("n_flights", 100),
+            distance_target_m=scene.get("distance_target_m", 6000),
+            distance_tolerance_m=scene.get("distance_tolerance_m", 1200),
+        )
+        cfg["flight"]["n_flights"] = cfg["flight_generation"]["n_flights"]
+        cfg["conflict"].update(scene["conflict"])
         cfg["optimization"]["stage1_key_ratio"] = 0.10
         cfg["optimization"]["stage1_key_selection_mode"] = "fixed_ci"
+    else:
+        for section in ("flight_generation", "astar", "conflict"):
+            cfg[section] = copy.deepcopy(cfg["legacy_scene"][section])
     return cfg
 
 
