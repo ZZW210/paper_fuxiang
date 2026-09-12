@@ -42,13 +42,15 @@ continuous overlapping conflict segments are not undercounted.
 ```bash
 python run_main.py --scheduler-mode paper_strict --quick --seed 2025
 python run_main.py --scheduler-mode paper_strict --seed 2025
-python run_main.py --scheduler-mode paper_strict --paper-objective-scale-mode initial_reference_experimental --seed 2025 --outputs outputs_initial_reference_experimental
-python compare_objective_scales.py
+python run_main.py --scheduler-mode paper_strict --quick --seed 2025 --run-id test_001
+# Optional, manually requested experiment:
+python run_main.py --scheduler-mode paper_strict --paper-objective-scale-mode initial_reference_experimental --seed 2025
+python compare_objective_scales.py --raw-run-id RAW_RUN_ID --norm-run-id NORM_RUN_ID
 python check_paper_strict.py
 python run_main.py --scheduler-mode legacy_engineering --seed 2025 --outputs outputs_legacy
 ```
 
-目标论文明确给出两阶段优化：普通CI排名固定前10%的关键飞行计划整体优化；重新探测剩余冲突点，再进行独立匹配和改进FATA求解。三策略是错峰起飞、速度调整、局部改航。Stage1每架关键UAV使用三个连续激活基因，以0.5为阈值，允许七种非空组合；全部低于阈值时启用最大基因对应策略，同分按策略ID。Stage2按每个剩余冲突点建立`(m,3)`概率矩阵，每个冲突独立采样一种策略并开放两端UAV对应变量；共享UAV可累积多种策略块，原始采样标签始终保留，不投票或重写。
+目标论文3.2.1：对普通CI固定前10%的每个关键计划分配一个具体策略及其对应决策变量，同步求解整个关键集合。Stage1每架只有一个`strategy_gene∈[0,3]`，floor并clip至0/1/2分别对应schedule/speed/reroute；没有三个任意activation genes。Stage2重新检测后以每个conflict POINT为独立匹配单位建立`(m,3)`概率矩阵，同步独立采样原始策略标签，由FATA搜索`actor_gene∈[0,2]`选择本冲突主要调整的一端。最终多策略只来自不同冲突选择同一UAV却匹配不同策略，或来自两阶段累计；不投票，不全局强制单UAV单策略。
 
 目标论文给出`ATD∈[1,3600]`、`|ETD-ATD|≤1800`、逐航段`v∈[5,20]`、电池时间1200秒，以及佳点集、动态delta和式(49)-(51)的适应度结构。严格模式使用连续ATD，允许提前起飞；完整逐航段速度用于Stage1，局部连续速度用于Stage2；FATA搜索局部via-cell的xyz，经A*连接为26邻域无障碍路径。冲突窗口使用目标论文表1的30秒，旧工程的20秒校准仅属于legacy。
 
@@ -61,15 +63,23 @@ normal默认`Parf=.2, NP=50`，两阶段各200代，权重`wc=.8, wd=.25, wr=.5,
 旧约[0,1]目标直接加100/1000罚项时容易被罚项支配，且与论文公布的fitness量级不符。因此默认直算打印式(51)，initial-reference仅作实现假设对照；这不表示作者未公开的无量纲化已经复原。
 
 1. 默认`optimization.paper_objective_scale_mode: raw_equation`直接计算打印式(51)：`(1-wc)*(wd*Tdelay+wt*Tair+wr*ORISK)+wc*delta*Nc*Tair+1000*n_battery+100*n_delay`。论文说明无量纲化但变换未公开，因此不能声称此尺度复原了作者实现。旧固定初始归一化仅作为`initial_reference_experimental`保留：`Tdelay/(N*1800)`、`Tair/initial_total_air_time`、`ORISK/initial_total_risk`、`Nc/max(1,initial_conflict_points)`，两阶段共用初始参考。不反向调系数拟合论文结果，也不自动选尺度。现有归一化风险地图未改变，ORISK仍对每次路径栅格访问求和。
-2. 局部变长路径编码未公开；本实现用FATA优化via-cell xyz，再由A*连接。xyz完整范围搜索后四舍五入，内部坐标0-based。局部窗口索引半径4，只合并重叠路径窗口，不合并ADM冲突点。via恰好等于原窗口中点时保留原路径；Stage2每个路径窗口另有一个FATA搜索的连续no-op激活基因（阈值0.5），让两端都可保持原路径。这些都是编码假设。替换段以归一化弧长投影继承当前速度，保留Stage1及组合内的逐段速度调整，不新增速度决策。
-3. learning_rate=0.5 来自参考[6]；dominant_fraction 未在可获得论文文本中明确给出，0.20 为实现假设。初始均匀`[1/3,1/3,1/3]`遵循本次复现要求，Algorithm2本身未明确列出初始数值。
+2. 局部变长路径编码未公开；本实现用FATA优化局部via xyz，再由原基础A*连接。包围盒由局部段起点、冲突cell、终点确定，默认XY余量5格、Z余量1层，取空域交集并round。局部路径窗口半径4，相近索引默认`reroute_merge_window=5`合并，重叠窗口也合并以保证拼接；ADM冲突点不合并。via包围盒只限制via，不额外裁剪A*搜索路径。没有reroute二次开关，也没有特殊中点保留原路径旁路；策略为reroute且actor被选中即执行A*。替换段按归一化弧长投影继承当前速度，保留Stage1调整及跨冲突speed效果。这些均为编码假设。
+3. learning_rate=0.5 来自参考[6]；dominant_fraction=.20仍是实现假设。初始均匀`[1/3,1/3,1/3]`遵循复现要求。更新原始优势species频率后，在normalize前`maximum(P,1e-12)`仅作数值稳定，不设0.05人工探索下限。
 4. 目标论文将独立匹配机制与FATA组合的完整源代码未公开。本实现按每代独立采样species、评价、选优势种群、更新P、执行FATA的MLF/LPS。固定联合变量布局保留各策略的连续块，未选块被忽略；不声称逐行复刻参考[6]原ISFS的双层嵌套循环。
-5. 同一UAV关联多个冲突时，各点的原始标签只决定开放哪些共享变量块，允许schedule+speed+reroute组合。速度只更新被采样为speed的冲突局部航段，改航只启用reroute标签关联且激活的窗口。两端开放不等于两端强制修改：ATD、逐段速度原值及不改航均合法，由FATA决定修改一端、两端或都不改；无固定owner或actor。
+5. TRC第9页描述依据剩余航路、目的地选择改航对象的原则及示例，速度示例还会调整双方，但可获得文本没有完整公开通用conflict pair actor selection算法或源代码。本轮采用二元actor决策变量：<1选plan_a，否则选plan_b，由FATA决定，不按奇偶、ID或中心性指定；这是实现假设。固定维度FATA保留去重的共享槽：每UAV一个ATD、每实际segment一个speed、每独立区域一个via块。每个候选按sampled species和actor构造`flight_strategy_requirements`，只开放该actor实际对应的策略槽；不复制每个冲突的完整FlightPlan变量。
 6. Stage2几何和速度变量严格基于Stage1计划及重新检测的冲突索引，不投影回原路径。未启用的变量保留Stage1值，允许跨阶段组合。ATD绝对边界、Tdelay、最终changed仍相对初始计划；Stage2增量修改数另相对Stage1。策略历史记录参与块（可有no-op），不等于实际物理变化；实际改航数单列。
 7. FATA基础更新对照根目录`FATA.m`，包括scalar-rand reset、IP、p、Para1/Para2、两相折射及全内反射；不可行几何个体fitness为inf，有限哨兵仅供MLF积分的数值处理。电池超限按式(50)罚项计入，未增加硬拒绝。每代用当前delta重评估保存的best；省略末代未被评价的位置更新，它不影响FATA.m返回的解。
 8. 初始城市/OD和时间不确定性模型沿用已有工程近似，不属于本次优化方法重构范围。原生成器可能产生ETD=0，严格运行将其提升至1秒作为合法初始计划，并重写initial_plans.pkl。
 
-新增科研文件：`paper_stage1_strategy_assignment.csv`（组合以`+`连接）、`paper_stage2_conflict_strategy.csv`（最佳原始species）、`paper_flight_strategy_history.csv`、`adm_probability_history.csv`（含第0代）、`paper_convergence.csv/png`、`paper_run_config.json`和`paper_strict_implementation_report.md`。normal收敛代为1..200和201..400，阶段切换虚线为200；quick为50。策略CSV中的概率是终代P，selected_strategy未必等于终代P的argmax。metrics记录组合参与数、实际改航数、Stage2增量修改数、提前/延后架数及平均/最大绝对ATD偏移；`n_delay=0`且`Tdelay>20000`只做诊断，不触发限制。两组normal完成后运行`compare_objective_scales.py`，校验相同配置、种子和初始文件SHA256，并写`outputs/objective_scale_comparison.csv`；不同尺度fitness不可直接比较。旧比较/敏感性文件仅代表此前独立实验。
+性能优化：静态pair/occupancy缓存的`IncrementalConflictEvaluator`与完整检测共用同一个数学内核，分别测试确定/不确定模型各50个候选的所有Conflict字段及顺序；目标贡献缓存按原计划和栅格求和顺序，50候选full/cached fitness差<1e-10；`CandidatePlanView`仅复制选中actor，其他保持base引用；每进程持久LRU32768，key含端点、via、障碍/风险地图hash及权重，逐项淘汰，不clear全缓存；每阶段持久pool最多8进程，BLAS线程各1；坐标向量化保留交错随机数及逐行更新，经3/40/180维和真实ADM测试与标量更新同seed逐位一致，可用`paper_performance.fata_vectorized_update`切回标量。`performance_profile.csv`为包含性计时：worker时间和父进程等待重叠，percentage可超过100%；序列化行仅是pickle探针估计，不假装精确拆分IPC。
+
+每次`run_main.py`都生成唯一run_id，自动格式为`YYYYMMDD_HHMMSS_mmm_schedulerMode_objectiveMode_seedXXXX_gitSHORTSHA`，可显式`--run-id test_001`。输出只写入`outputs/runs/<run_id>/`（`--outputs`改归档根目录，不是直接文件目录）；已有目录默认FileExistsError，只有显式`--overwrite-run`才能覆盖。所有CSV第一列run_id；PNG底部标识run_id并放`figures/`；保存`config_snapshot.yaml`、`run_manifest.json`、`stdout.log`、`final_plans.pkl`及`logs/`。成功后append `outputs/run_index.csv`并更新`outputs/latest_run.txt`，失败不登记成功索引。
+
+`python make_fata_report.py`默认重建latest_run的报告，`--run-id`可选择已完成归档，不再从旧根目录metrics生成当前strict报告。旧legacy报告需显式`--historical-output`。
+
+科研文件含Stage1单具体策略、Stage2逐代generation_best和selected_best原始策略/actor/当时代采样概率、飞行策略历史（各策略所选actor冲突数及最终组合）、ADM第0代起概率历史、收敛、性能profile和方法报告。normal收敛为1..200与201..400，quick为1..50与51..100；若Stage1零冲突，明确跳过Stage2。策略参与不等于物理变化，实际改航另列。metrics还记录维度、fitness评价数、A*缓存、提前/延后及绝对ATD偏移；不以定性结果强制比例或repair。
+
+两种尺度只能以不同child run_id保存；手动完成两组相同预算实验后，`compare_objective_scales.py --raw-run-id RAW_RUN_ID --norm-run-id NORM_RUN_ID`校验相同配置、种子和初始数据（CSV比较排除run_id），写入`outputs/comparisons/<comparison_id>/objective_scale_comparison.csv`及`comparison_manifest.json`。脚本不启动实验，不自动选更好模式。开发验证只需pytest和一次quick，不自动运行normal双尺度、重复实验、敏感性、PSO或GA。旧outputs根目录文件仅作历史结果保留，不代表新代码的运行。
 
 如果环境暂时缺少 `pyyaml` 或 `tqdm`，代码会使用内置 fallback；`pytest` 仍建议安装后运行。
 
@@ -98,7 +108,7 @@ normal默认`Parf=.2, NP=50`，两阶段各200代，权重`wc=.8, wd=.25, wr=.5,
 
 ## 输出
 
-主流程输出位于 `outputs/`：
+新主流程输出位于 `outputs/runs/<run_id>/`；旧 `outputs/` 根目录文件保留为历史结果。以下对比baseline表仅属于legacy或单独实验，strict不自动运行：
 
 - `metrics_summary.csv`
 - `conflicts_uncertain.csv`

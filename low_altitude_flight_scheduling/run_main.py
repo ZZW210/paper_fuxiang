@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pickle
 import time
 from pathlib import Path
+
+for _thread_variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ[_thread_variable] = "1"
 
 import numpy as np
 import pandas as pd
@@ -56,6 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--n-flights", type=int, default=None)
     parser.add_argument("--outputs", default="outputs")
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--overwrite-run", action="store_true")
     parser.add_argument("--scheduler-mode", choices=["paper_strict", "legacy_engineering"], default=None)
     parser.add_argument("--n-jobs", type=int, default=None)
     parser.add_argument("--paper-objective-scale-mode", choices=["raw_equation", "initial_reference_experimental"], default=None)
@@ -208,6 +214,18 @@ def main() -> None:
         cfg["flight"]["n_flights"] = int(args.n_flights)
         cfg.setdefault("flight_generation", {})["n_flights"] = int(args.n_flights)
     cfg["flight"]["random_seed"] = int(args.seed)
+    if not 1 <= cfg["optimization"]["n_jobs"] <= 8:
+        raise ValueError("n_jobs must be between 1 and 8")
+    if cfg["optimization"]["scheduler_mode"] == "paper_strict":
+        cfg["conflict"]["t_conflict"] = 30.0
+    from src.run_archive import RunArchive
+
+    with RunArchive(root, root / args.outputs, cfg, args) as archive:
+        args.outputs = str(archive.directory)
+        _dispatch(cfg, args, root)
+
+
+def _dispatch(cfg, args, root):
     if cfg["optimization"]["scheduler_mode"] == "paper_strict":
         from src.paper_scheduler import run_paper_main
 

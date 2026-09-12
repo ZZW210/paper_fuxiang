@@ -196,6 +196,16 @@ adm:
 paper_encoding:
   # Implementation assumption: radius in path indices, not a candidate list.
   local_window_segments: 4
+  reroute_merge_window: 5
+  local_margin_xy: 5
+  local_margin_z: 1
+  astar_cache_size: 32768
+
+paper_performance:
+  incremental_conflicts: true
+  objective_cache: true
+  reroute_cache: true
+  fata_vectorized_update: true
 
 visualization:
   show_ground_start_goal: true

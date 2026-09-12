@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import pickle
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -22,6 +22,7 @@ from .grid import AirspaceGrid
 from .paper_optimization import (PaperPopulationObjective, PaperReference, PaperEvaluation,
                                 build_stage1_decision_layout, build_stage2_decision_layout,
                                 paper_objective_components, paper_fitness, conflict_weight_delta, flight_strategies)
+from .paper_performance import PerformanceCounters
 from .risk_map import generate_risk_map
 from .utils import ensure_dir, set_random_seed
 from .visualization import write_all_route_visuals, write_strategy_overview_html
@@ -35,6 +36,9 @@ class PaperScheduleResult:
     stage1_seconds: float
     stage2_seconds: float
     convergence: list[dict]
+    performance: dict = field(default_factory=dict)
+    dimensions: tuple = (0, 0)
+    fitness_evaluations: tuple = (0, 0)
 
 
 def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, progress=True):
@@ -44,6 +48,8 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
     layout1 = build_stage1_decision_layout(plans, key_ids, conflicts, cfg, grid)
     objective1 = PaperPopulationObjective(plans, plans, layout1, cfg, grid, risk_map, reference, generations1, 1)
     trace = []
+    performance = PerformanceCounters()
+    evaluations1, dimension2 = 0, 0
 
     def record(stage, objective, offset):
         def callback(position, score, generation, context):
@@ -64,15 +70,19 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
             population=cfg["fata"]["NP"], max_iter=generations1, seed=cfg["flight"]["random_seed"],
             parf=cfg["fata"]["Parf"], n_jobs=cfg["optimization"]["n_jobs"],
             callback=record("stage1", objective1, 0),
+            vectorized_update=cfg.get("paper_performance", {}).get("fata_vectorized_update", False),
         )
         if not np.isfinite(result1.best_fitness):
             raise RuntimeError("Stage 1 found no geometrically feasible candidate")
         stage1 = objective1.evaluation(result1.best_position, generations1)
+        performance.add(result1.performance or {})
+        evaluations1 = result1.fitness_evaluations
     else:
         components = paper_objective_components(plans, plans, risk_map, conflicts, cfg)
         stage1 = PaperEvaluation(paper_fitness(components, reference, cfg, generations1, generations1),
                                 components, plans, conflicts, 0.9)
     seconds1 = time.perf_counter() - start
+    performance.add(objective1.profile.snapshot())
     if progress:
         print(f"Stage 1 remaining conflicts: {stage1.components['Nc']}", flush=True)
         print(f"Stage 2 remaining conflict points: {len(stage1.conflicts)}", flush=True)
@@ -80,20 +90,27 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
     adm = None
     if stage1.conflicts:
         layout2 = build_stage2_decision_layout(stage1.plans, stage1.conflicts, cfg, grid, plans)
+        dimension2 = layout2.dim
         objective2 = PaperPopulationObjective(stage1.plans, plans, layout2, cfg, grid, risk_map, reference, generations2, 2)
         adm = adm_fata_optimize(stage1.plans, plans, stage1.conflicts, layout2, cfg, grid, risk_map,
                                 reference, seed=cfg["flight"]["random_seed"] + 206,
                                 callback=record("stage2", objective2, generations1))
-        final_conflicts = detect_conflicts(adm.best_plans, cfg, uncertain=True)
-        components = paper_objective_components(adm.best_plans, plans, risk_map, final_conflicts, cfg)
+        with objective2.profile.measure("conflict_detection"):
+            final_conflicts = detect_conflicts(adm.best_plans, cfg, uncertain=True)
+        with objective2.profile.measure("objective"):
+            components = paper_objective_components(adm.best_plans, plans, risk_map, final_conflicts, cfg)
         final = PaperEvaluation(paper_fitness(components, reference, cfg, generations2, generations2),
                                 components, adm.best_plans, final_conflicts,
                                 conflict_weight_delta(generations2, generations2, cfg["fata"]["gamma"]))
+        performance.add(adm.performance or {})
+        performance.add(objective2.profile.snapshot())
     else:
         if progress:
             print("Stage 2 skipped: no remaining conflicts.", flush=True)
         final = stage1
-    return PaperScheduleResult(stage1, final, adm, seconds1, time.perf_counter() - start, trace)
+    return PaperScheduleResult(stage1, final, adm, seconds1, time.perf_counter() - start, trace,
+                               performance.snapshot(), (layout1.dim, dimension2),
+                               (evaluations1, adm.fitness_evaluations if adm else 0))
 
 
 def _strategy_name(values):
@@ -136,24 +153,39 @@ def write_paper_diagnostics(out, result, initial, key_ids, ranked_metrics, cfg):
     conflict_rows, probability_rows = [], []
     if result.adm is not None:
         adm = result.adm
-        for i, conflict in enumerate(result.stage1.conflicts):
-            p = adm.final_probability[i]
-            conflict_rows.append(dict(conflict_id=i, plan_a=conflict.plan_a, plan_b=conflict.plan_b,
-                                      cell_x=conflict.cell[0], cell_y=conflict.cell[1], cell_z=conflict.cell[2],
-                                      P_schedule=p[0], P_speed=p[1], P_reroute=p[2],
-                                      selected_strategy=_strategy_name(adm.best_strategies[i])))
+        records = [(g, actors, sampled, adm.probability_history[g - 1], "generation_best")
+                   for g, actors, sampled in (adm.generation_history or [])]
+        records.append((adm.best_generation, adm.best_decision_vector[:len(result.stage1.conflicts)], adm.best_strategies,
+                        adm.probability_history[max(0, adm.best_generation - 1)], "selected_best"))
+        for generation, actors, sampled, probability, record_type in records:
+            for i, conflict in enumerate(result.stage1.conflicts):
+                p = probability[i]
+                conflict_rows.append(dict(conflict_id=i, plan_a=conflict.plan_a, plan_b=conflict.plan_b,
+                                          cell_x=conflict.cell[0], cell_y=conflict.cell[1], cell_z=conflict.cell[2],
+                                          P_schedule=p[0], P_speed=p[1], P_reroute=p[2],
+                                          sampled_strategy=_strategy_name(sampled[i]), actor_gene=actors[i],
+                                          selected_actor=conflict.plan_a if actors[i] < 1 else conflict.plan_b,
+                                          stage2_generation=generation, record_type=record_type))
         for generation, matrix in enumerate(adm.probability_history):
             for i, p in enumerate(matrix):
                 probability_rows.append(dict(generation=generation, conflict_id=i, P_schedule=p[0], P_speed=p[1], P_reroute=p[2]))
-    pd.DataFrame(conflict_rows, columns=["conflict_id", "plan_a", "plan_b", "cell_x", "cell_y", "cell_z", "P_schedule", "P_speed", "P_reroute", "selected_strategy"]).to_csv(out / "paper_stage2_conflict_strategy.csv", index=False)
+    conflict_columns = ["conflict_id", "plan_a", "plan_b", "cell_x", "cell_y", "cell_z", "P_schedule", "P_speed", "P_reroute",
+                        "sampled_strategy", "actor_gene", "selected_actor", "stage2_generation", "record_type"]
+    pd.DataFrame(conflict_rows, columns=conflict_columns).to_csv(out / "paper_stage2_conflict_strategy.csv", index=False)
     stage1_map = {p.id: p for p in result.stage1.plans}
     history = []
     for plan in result.final.plans:
         stage1_active = flight_strategies(stage1_map[plan.id])
         stage2_active = result.adm.best_flight_strategies.get(plan.id, ()) if result.adm else ()
-        row = {"flight_id": plan.id}
+        counts = {name: sum(r["selected_actor"] == plan.id and r["sampled_strategy"] == name and r["record_type"] == "selected_best" for r in conflict_rows)
+                  for name in ("schedule", "speed", "reroute")}
+        row = {"flight_id": plan.id, "is_key_flight": int(plan.id in key_ids),
+               "stage1_strategy": _strategy_name(stage1_active) if stage1_active else "none",
+               **{f"stage2_{name}_conflict_count": value for name, value in counts.items()},
+               "final_strategy_combination": _strategy_name(flight_strategies(plan)) or "none"}
         for stage, active in (("stage1", stage1_active), ("stage2", stage2_active), ("final", flight_strategies(plan))):
             row.update({f"{stage}_{name}": int(i in active) for i, name in enumerate(("schedule", "speed", "reroute"))})
+        row.update({f"final_uses_{name}": int(i in flight_strategies(plan)) for i, name in enumerate(("schedule", "speed", "reroute"))})
         history.append(row)
     pd.DataFrame(history).to_csv(out / "paper_flight_strategy_history.csv", index=False)
     pd.DataFrame(probability_rows, columns=["generation", "conflict_id", "P_schedule", "P_speed", "P_reroute"]).to_csv(out / "adm_probability_history.csv", index=False)
@@ -178,6 +210,7 @@ def write_paper_diagnostics(out, result, initial, key_ids, ranked_metrics, cfg):
 
 def run_paper_main(cfg, args, root: Path):
     start = time.perf_counter()
+    output_profile = PerformanceCounters()
     out = ensure_dir(root / args.outputs)
     set_random_seed(args.seed)
     # Table 1: strict scheduling uses 30 s, not the legacy calibration's 20 s.
@@ -214,6 +247,7 @@ def run_paper_main(cfg, args, root: Path):
     summary = dict(
         scheduler_mode="paper_strict", seed=args.seed, n_jobs=cfg["optimization"]["n_jobs"],
         paper_objective_scale_mode=cfg["optimization"]["paper_objective_scale_mode"],
+        run_id=cfg.get("run", {}).get("run_id", "unarchived"),
         NP=cfg["fata"]["NP"], Ngen_max_stage1=cfg["fata"]["Ngen_max_stage1"], Ngen_max_stage2=cfg["fata"]["Ngen_max_stage2"],
         stage2_skipped=result.adm is None, initial_conflicts_uncertain=len(conflicts),
         initial_conflicts_without_uncertainty=len(conflicts_no), initial_conflict_points_uncertain=len(conflicts),
@@ -235,8 +269,16 @@ def run_paper_main(cfg, args, root: Path):
         stage2_actual_rerouted_flight_count=sum(p.path != base.path for p, base in zip(result.final.plans, result.stage1.plans)),
         stage2_modified_flight_count=sum(_physically_changed(base, p) for base, p in zip(result.stage1.plans, result.final.plans)),
         stage2_newly_changed_flight_count=sum(not base.changed and p.changed for base, p in zip(result.stage1.plans, result.final.plans)),
+        stage1_dimension=result.dimensions[0], stage2_dimension=result.dimensions[1],
+        stage1_fitness_evaluations=result.fitness_evaluations[0], stage2_fitness_evaluations=result.fitness_evaluations[1],
+        astar_calls=result.performance.get("astar_calls", 0), astar_cache_hits=result.performance.get("astar_cache_hits", 0),
+        astar_cache_misses=result.performance.get("astar_cache_misses", 0), astar_seconds=result.performance.get("astar_seconds", 0),
+        conflict_detection_calls=result.performance.get("conflict_detection_calls", 0),
+        runtime_stage1=result.stage1_seconds, runtime_stage2=result.stage2_seconds,
     )
     summary.update(timing_shift_diagnostics(plans, result.final.plans))
+    accesses = summary["astar_cache_hits"] + summary["astar_cache_misses"]
+    summary["astar_cache_hit_rate"] = summary["astar_cache_hits"] / accesses if accesses else 0.0
     summary["large_advance_without_delay_observed"] = bool(result.final.components["n_delay"] == 0 and result.final.components["Tdelay"] > 20000)
     for key, value in result.final.components.items():
         if key != "Nc":
@@ -244,22 +286,33 @@ def run_paper_main(cfg, args, root: Path):
     for stage, counts in ((1, counts1), (2, counts2)):
         for name, count in counts.items():
             summary[f"stage{stage}_strategy_{name}_count"] = count
-    write_paper_diagnostics(out, result, plans, key_ids, ranked, cfg)
+    with output_profile.measure("file_output"):
+        write_paper_diagnostics(out, result, plans, key_ids, ranked, cfg)
     for name, saved in (("final_plans_one_stage.pkl", result.stage1.plans), ("final_plans_two_stage.pkl", result.final.plans)):
         with (out / name).open("wb") as fh:
-            pickle.dump(saved, fh)
+            pickle.dump(list(saved), fh)
     write_conflict_diagnostics(result.final.conflicts, out)
     pd.DataFrame([dict(method="paper_two_stage_adm_fata", final_conflicts=len(result.final.conflicts), fitness=result.final.fitness),
                   dict(method="paper_stage1_three_strategy_fata", final_conflicts=len(result.stage1.conflicts), fitness=result.stage1.fitness)]).to_csv(out / "table_two_stage_vs_one_stage.csv", index=False)
-    write_all_route_visuals(out, grid, plans, result.final.plans, result.stage1.plans, conflicts, conflicts_no, result.final.conflicts, key_ids)
+    with output_profile.measure("visualization"):
+        write_all_route_visuals(out, grid, plans, result.final.plans, result.stage1.plans, conflicts, conflicts_no, result.final.conflicts, key_ids)
     summary["runtime_seconds"] = time.perf_counter() - start
     summary["total_runtime"] = summary["runtime_seconds"]
-    write_strategy_overview_html(out / "strategy_overview.html", summary, ranked, attacks,
-                                  [r["fitness"] for r in result.convergence], grid=grid, initial=plans,
-                                  optimized=result.final.plans, conflicts=result.final.conflicts, key_ids=key_ids)
+    with output_profile.measure("visualization"):
+        write_strategy_overview_html(out / "strategy_overview.html", summary, ranked, attacks,
+                                      [r["fitness"] for r in result.convergence], grid=grid, initial=plans,
+                                      optimized=result.final.plans, conflicts=result.final.conflicts, key_ids=key_ids)
     summary["runtime_seconds"] = time.perf_counter() - start
     summary["total_runtime"] = summary["runtime_seconds"]
     pd.DataFrame([summary]).to_csv(out / "metrics_summary.csv", index=False)
+    for key, value in output_profile.snapshot().items():
+        result.performance[key] = result.performance.get(key, 0) + value
+    rows = []
+    for component in ("fata_population_evaluation", "fata_population_update", "conflict_detection", "objective", "route_decode", "astar", "multiprocessing_serialization", "visualization", "file_output"):
+        calls, seconds = result.performance.get(component + "_calls", 0), result.performance.get(component + "_seconds", 0)
+        rows.append(dict(component=component, calls=calls, total_seconds=seconds, mean_ms=1000 * seconds / calls if calls else 0,
+                         percentage=100 * seconds / summary["total_runtime"]))
+    pd.DataFrame(rows).to_csv(out / "performance_profile.csv", index=False)
     from .paper_consistency import write_implementation_report, write_paper_html_report
 
     write_implementation_report(out, summary)

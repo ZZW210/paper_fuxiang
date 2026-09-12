@@ -1,0 +1,32 @@
+{
+  "run_id": "20260912_174204_152_paper_strict_raw_equation_seed2025_01f04b03",
+  "start_time": "2026-09-12T17:42:04.153811+08:00",
+  "end_time": "2026-09-12T17:42:35.216018+08:00",
+  "status": "completed",
+  "git_commit": "01f04b03fa37cceb353a37ca2ace0ffe44ef9b86",
+  "git_dirty": true,
+  "seed": 2025,
+  "scheduler_mode": "paper_strict",
+  "objective_scale_mode": "raw_equation",
+  "quick": true,
+  "NP_stage1": 20,
+  "NP_stage2": 20,
+  "Ngen_stage1": 50,
+  "Ngen_stage2": 50,
+  "n_jobs": 8,
+  "python_version": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "cpu_count": 20,
+  "config_file": "D:\\Desktop\\paper_fuxiang\\low_altitude_flight_scheduling\\config.yaml",
+  "initial_conflicts": 130,
+  "stage1_conflicts": 102,
+  "final_conflicts": 14,
+  "blas_threads": {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1"
+  },
+  "performance_timing_note": "Inclusive worker CPU-wall timings overlap parent evaluation wall time; serialization is a pickle probe, not isolated IPC time.",
+  "elapsed_seconds": 31.058942799998476
+}

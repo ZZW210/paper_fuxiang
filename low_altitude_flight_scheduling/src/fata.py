@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
 from typing import Callable
+import pickle
+
+from .paper_performance import PerformanceCounters
 
 import numpy as np
 
@@ -23,6 +26,9 @@ class FATAResult:
 @dataclass
 class PaperFATAResult(FATAResult):
     best_context: np.ndarray | None
+    performance: dict | None = None
+    fitness_evaluations: int = 0
+    best_generation: int = 0
 
 
 _PAPER_WORKER_OBJECTIVE = None
@@ -37,9 +43,35 @@ def _initialize_paper_worker(objective, context_objective):
 
 def _paper_worker_evaluate(task):
     vector, generation, context = task
+    objective = _PAPER_WORKER_CONTEXT_OBJECTIVE or _PAPER_WORKER_OBJECTIVE
+    profile = getattr(getattr(objective, "__self__", None), "profile", None)
+    before = profile.snapshot() if profile else {}
     if _PAPER_WORKER_CONTEXT_OBJECTIVE is not None:
-        return float(_PAPER_WORKER_CONTEXT_OBJECTIVE(vector, generation, context))
-    return float(_PAPER_WORKER_OBJECTIVE(vector, generation))
+        score = float(_PAPER_WORKER_CONTEXT_OBJECTIVE(vector, generation, context))
+    else:
+        score = float(_PAPER_WORKER_OBJECTIVE(vector, generation))
+    return score, profile.delta(before) if profile else {}
+
+
+def fata_vectorized_update(flight, i, best, para1, para2, p, rng, lower, upper, parf, enabled=True):
+    """Batch coordinates but preserve interleaved draws and sequential row updates."""
+    dim, population = flight.shape[1], len(flight)
+    if not enabled:
+        for j in range(dim):
+            num = int(np.floor(rng.random() * population))
+            if rng.random() < p:
+                flight[i, j] = best[j] + flight[i, j] * para1[j]
+            else:
+                flight[i, j] = flight[num, j] + para2[j] * flight[i, j]
+                flight[i, j] = 0.5 * (parf + 1.0) * (lower[j] + upper[j]) - parf * flight[i, j]
+        return
+    draws = rng.random((dim, 2))
+    nums = np.floor(draws[:, 0] * population).astype(int)
+    first = draws[:, 1] < p
+    current = flight[i].copy()
+    second = flight[nums, np.arange(dim)] + para2 * current
+    second = 0.5 * (parf + 1.0) * (lower + upper) - parf * second
+    flight[i] = np.where(first, best + current * para1, second)
 
 
 def fata_optimize_paper(
@@ -56,13 +88,14 @@ def fata_optimize_paper(
     generation_context=None,
     objective_with_context=None,
     on_generation_evaluated=None,
+    vectorized_update=False,
 ) -> PaperFATAResult:
     """FATA.m MLF/LPS, with Eq.(48) initialization and a generation-aware objective.
 
     Context hooks implement ADM without changing continuous position updates.
     Only objective evaluation runs in workers; RNG and selection stay ordered.
     """
-    if dim < 1 or population < 2 or max_iter < 1 or n_jobs < 1:
+    if dim < 1 or population < 2 or max_iter < 1 or not 1 <= n_jobs <= 8:
         raise ValueError("Positive dimension, generations/jobs and population >= 2 required")
     lower = np.broadcast_to(np.asarray(lb, dtype=float), (dim,)).copy()
     upper = np.broadcast_to(np.asarray(ub, dtype=float), (dim,)).copy()
@@ -75,6 +108,8 @@ def fata_optimize_paper(
     best_score = float("inf")
     worst_integral, best_integral = 0.0, float("inf")
     convergence, remaining, delays = [], [], []
+    performance = PerformanceCounters()
+    evaluations, best_generation = 0, 0
     executor = None
     if n_jobs > 1:
         executor = ProcessPoolExecutor(
@@ -84,7 +119,14 @@ def fata_optimize_paper(
 
     def evaluate(tasks):
         if executor is not None:
-            return list(executor.map(_paper_worker_evaluate, tasks))
+            # A serialization probe is measurable; executor-internal pickle time
+            # cannot be isolated from IPC. Report this explicitly as an estimate.
+            with performance.measure("multiprocessing_serialization"):
+                pickle.dumps(tasks, protocol=pickle.HIGHEST_PROTOCOL)
+            results = list(executor.map(_paper_worker_evaluate, tasks))
+            for _, values in results:
+                performance.add(values)
+            return [score for score, _ in results]
         return [float(objective_with_context(x, gen, context))
                 if objective_with_context is not None
                 else float(objective_with_iter(x, gen)) for x, gen, context in tasks]
@@ -98,7 +140,9 @@ def fata_optimize_paper(
             has_incumbent = np.isfinite(best_score)
             if has_incumbent:
                 tasks.append((best_pos, generation, best_context))
-            scores = np.asarray(evaluate(tasks), dtype=float)
+            with performance.measure("fata_population_evaluation"):
+                scores = np.asarray(evaluate(tasks), dtype=float)
+            evaluations += len(tasks)
             fitness = scores[:population]
             if has_incumbent:
                 best_score = float(scores[-1])
@@ -107,6 +151,7 @@ def fata_optimize_paper(
                     best_score = float(fitness[i])
                     best_pos = flight[i].copy()
                     best_context = None if contexts[i] is None else np.array(contexts[i], copy=True)
+                    best_generation = generation
             if on_generation_evaluated:
                 on_generation_evaluated(generation, flight.copy(), fitness.copy(), contexts)
             convergence.append(best_score)
@@ -134,25 +179,21 @@ def fata_optimize_paper(
             a = np.tan(1.0 - generation / max_iter)
             b = 1.0 / a
             worst = float(order[-1])
-            for i in range(population):
-                para1 = a * rng.random(dim) - a * rng.random(dim)
-                para2 = b * rng.random(dim) - b * rng.random(dim)
-                p = (quality[i] - worst) / (best_score - worst + eps)
-                if rng.random() > ip:
-                    # FATA.m uses scalar rand here (the same fraction in all axes).
-                    flight[i] = (upper - lower) * rng.random() + lower
-                else:
-                    for j in range(dim):
-                        num = int(np.floor(rng.random() * population))
-                        if rng.random() < p:
-                            flight[i, j] = best_pos[j] + flight[i, j] * para1[j]
-                        else:
-                            flight[i, j] = flight[num, j] + para2[j] * flight[i, j]
-                            flight[i, j] = 0.5 * (parf + 1.0) * (lower[j] + upper[j]) - parf * flight[i, j]
+            with performance.measure("fata_population_update"):
+                for i in range(population):
+                    para1 = a * rng.random(dim) - a * rng.random(dim)
+                    para2 = b * rng.random(dim) - b * rng.random(dim)
+                    p = (quality[i] - worst) / (best_score - worst + eps)
+                    if rng.random() > ip:
+                        # FATA.m uses scalar rand here (the same fraction in all axes).
+                        flight[i] = (upper - lower) * rng.random() + lower
+                    else:
+                        fata_vectorized_update(flight, i, best_pos, para1, para2, p, rng, lower, upper, parf, vectorized_update)
     finally:
         if executor is not None:
             executor.shutdown(wait=True)
-    return PaperFATAResult(best_pos, best_score, convergence, remaining, delays, best_context)
+    return PaperFATAResult(best_pos, best_score, convergence, remaining, delays, best_context,
+                           performance.snapshot(), evaluations, best_generation)
 
 
 def _is_prime(n: int) -> bool:

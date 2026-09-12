@@ -41,6 +41,10 @@ class ADMResult:
     convergence: list[float]
     best_flight_strategies: dict[int, tuple[int, ...]]
     final_probability: np.ndarray
+    performance: dict | None = None
+    fitness_evaluations: int = 0
+    best_generation: int = 0
+    generation_history: list | None = None
 
 
 def initialize_probability_matrix(n_conflicts):
@@ -62,6 +66,7 @@ def update_probability_matrix(probability, dominant_species, learning_rate=0.5):
         raise ValueError("Invalid learning rate or strategy")
     frequencies = np.stack([(dominant_species == s).mean(axis=0) for s in range(3)], axis=1)
     updated = (1.0 - learning_rate) * probability + learning_rate * frequencies
+    updated = np.maximum(updated, 1e-12)
     return updated / updated.sum(axis=1, keepdims=True)
 
 
@@ -73,6 +78,7 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
     max_gen = int(cfg["fata"]["Ngen_max_stage2"])
     probability = initialize_probability_matrix(len(conflicts))
     history = [probability.copy()]
+    generation_history = []
     objective = PaperPopulationObjective(stage1_plans, initial_plans, layout, cfg, grid, risk_map,
                                           reference, max_gen, 2)
     fraction = float(cfg["adm"]["dominant_fraction"])
@@ -92,6 +98,8 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
         if len(ranked):
             dominant_species = np.asarray(contexts)[ranked]
             probability = update_probability_matrix(probability, dominant_species, cfg["adm"]["learning_rate"])
+        best_index = int(np.argmin(fitness))
+        generation_history.append((generation, positions[best_index, layout.actor_genes].copy(), np.asarray(contexts)[best_index].copy()))
         history.append(probability.copy())
 
     result = fata.fata_optimize_paper(
@@ -100,10 +108,15 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
         parf=cfg["fata"]["Parf"], n_jobs=cfg["optimization"]["n_jobs"],
         objective_with_context=objective.context_fitness, generation_context=generate_context,
         on_generation_evaluated=update, callback=callback,
+        vectorized_update=cfg.get("paper_performance", {}).get("fata_vectorized_update", False),
     )
     if not np.isfinite(result.best_fitness):
         raise RuntimeError("Stage 2 found no geometrically feasible candidate")
     evaluation = objective.evaluation(result.best_position, max_gen, result.best_context)
-    flight_strategies = stage2_flight_strategies(layout, result.best_context)
+    flight_strategies = stage2_flight_strategies(layout, result.best_context, result.best_position[layout.actor_genes])
+    performance = dict(result.performance or {})
+    for key, value in objective.profile.snapshot().items():
+        performance[key] = performance.get(key, 0) + value
     return ADMResult(result.best_context.copy(), result.best_position, evaluation.plans,
-                     evaluation.fitness, history, result.convergence, flight_strategies, probability)
+                     evaluation.fitness, history, result.convergence, flight_strategies, probability,
+                     performance, result.fitness_evaluations, result.best_generation, generation_history)

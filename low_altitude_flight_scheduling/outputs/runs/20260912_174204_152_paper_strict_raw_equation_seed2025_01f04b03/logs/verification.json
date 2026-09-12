@@ -1,0 +1,34 @@
+{
+  "run_id": "20260912_174204_152_paper_strict_raw_equation_seed2025_01f04b03",
+  "git_commit": "01f04b03fa37cceb353a37ca2ace0ffe44ef9b86",
+  "git_dirty": true,
+  "pytest": {"passed": 72, "failed": 0},
+  "consistency_checks": {"passed": 21, "failed": 0},
+  "standalone_quick_runs": 1,
+  "normal_runs": 0,
+  "quick_budget": {"flights": 100, "NP": 20, "stage1_generations": 50, "stage2_generations": 50, "n_jobs": 8, "seed": 2025},
+  "quick_results": {"initial_Nc": 130, "stage1_Nc": 102, "final_Nc": 14, "changed_flights": 49, "stage1_schedule": 6, "stage1_speed": 3, "stage1_reroute": 1},
+  "verified": [
+    "Every Stage1 key plan has exactly one concrete strategy",
+    "Stage2 actors are decoded from FATA actor genes, not parity or flight ID",
+    "Saved-plan full detector metrics and fitness match metrics_summary",
+    "Exactly 100 convergence rows with generations 1 through 100",
+    "Stage2 has 50 generation-best snapshots plus the saved-best snapshot",
+    "Strategy history final flags equal the union of stage flags",
+    "Every run CSV starts with matching run_id",
+    "Every generated PNG is archived in figures; savefig labeling is tested",
+    "Initial plans byte hash and risk map values match the prior initial scene",
+    "Incremental and full detectors match every field and ordering for 50 random candidates in each uncertainty mode, including repeated visits",
+    "Cached and full objective values match within 1e-10",
+    "All performance switches preserve seeded real ADM outputs in both objective modes",
+    "Vectorized FATA matches scalar seeded results bitwise at dimensions 3, 40 and 180",
+    "Manifest, snapshot, append-only index, overwrite refusal and failed-run handling are tested"
+  ],
+  "limitations": [
+    "Quick runtime is not directly comparable to prior normal runtime",
+    "Actor selection and local via encoding remain implementation assumptions",
+    "Profiling times are inclusive and overlap across parent and workers",
+    "Multiprocessing serialization time is a pickle probe estimate",
+    "No standalone normalized or normal comparison was run"
+  ]
+}

@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .astar_3d import astar_path
-from .conflict_detection import Conflict, count_conflict_points, detect_conflicts
+from .conflict_detection import Conflict, count_conflict_points, detect_conflicts, IncrementalConflictEvaluator
 from .flight_plan import FlightPlan
 from .grid import AirspaceGrid
+from .paper_performance import PerformanceCounters
 
 
 def conflict_weight_delta(current_gen, max_gen, gamma=5.0):
@@ -90,7 +94,7 @@ def paper_atd_bounds(plan, cfg):
 @dataclass
 class PaperFlightBlock:
     flight_id: int
-    activation_genes: slice | None
+    strategy_gene: int | None
     atd_gene: int
     speed_genes: slice
     segment_indices: list[int]
@@ -99,17 +103,10 @@ class PaperFlightBlock:
     incident_conflicts: list[int]
     conflict_segments: dict[int, list[int]]
     conflict_route_windows: dict[int, int]
-    reroute_enable_genes: list[int]
 
 
-def decode_activation_genes(values):
-    values = np.asarray(values, dtype=float)
-    if values.shape != (3,):
-        raise ValueError("Three activation genes required")
-    active = values >= 0.5
-    if not active.any():
-        active[int(np.argmax(values))] = True
-    return tuple(int(s) for s in np.flatnonzero(active))
+def decode_primary_strategy(value):
+    return int(np.clip(np.floor(value), 0, 2))
 
 
 def flight_strategies(plan):
@@ -119,11 +116,23 @@ def flight_strategies(plan):
     return () if plan.paper_strategy is None else (int(plan.paper_strategy),)
 
 
-def stage2_flight_strategies(layout, sampled_species):
+def flight_strategy_requirements(layout, sampled_species, actor_values):
     species = np.asarray(sampled_species, dtype=int)
     if species.shape != (layout.conflict_count,) or np.any((species < 0) | (species > 2)):
         raise ValueError("One sampled strategy required per remaining conflict point")
-    return {b.flight_id: tuple(sorted({int(species[i]) for i in b.incident_conflicts})) for b in layout.blocks}
+    actors = np.asarray(actor_values, dtype=float)
+    if actors.shape != (layout.conflict_count,) or not np.isfinite(actors).all():
+        raise ValueError("One actor gene required per remaining conflict point")
+    requirements = {}
+    for i, (conflict, strategy, actor) in enumerate(zip(layout.conflicts, species, actors)):
+        fid = conflict.plan_a if actor < 1.0 else conflict.plan_b
+        requirements.setdefault(fid, {}).setdefault(int(strategy), []).append(i)
+    return requirements
+
+
+def stage2_flight_strategies(layout, sampled_species, actor_values):
+    return {fid: tuple(sorted(values)) for fid, values in
+            flight_strategy_requirements(layout, sampled_species, actor_values).items()}
 
 
 @dataclass
@@ -132,14 +141,22 @@ class PaperDecisionLayout:
     lower: np.ndarray
     upper: np.ndarray
     conflict_count: int = 0
+    actor_genes: slice | None = None
+    conflicts: tuple = ()
 
     @property
     def dim(self):
         return len(self.lower)
 
 
-def _local_intervals(indices, path_length, window):
-    intervals = sorted((max(0, i - window), min(path_length - 1, i + window)) for i in indices)
+def _local_intervals(indices, path_length, window, merge_window=0):
+    groups = []
+    for idx in sorted(set(indices)):
+        if groups and idx - groups[-1][-1] <= merge_window:
+            groups[-1].append(idx)
+        else:
+            groups.append([idx])
+    intervals = [(max(0, g[0] - window), min(path_length - 1, g[-1] + window)) for g in groups]
     merged = []
     for start, end in intervals:
         if start == end:
@@ -155,7 +172,12 @@ def _build_layout(plans, flight_ids, conflicts, cfg, grid, stage, initial_plans=
     by_id = {p.id: p for p in plans}
     original = {p.id: p for p in (plans if initial_plans is None else initial_plans)}
     lower, upper, blocks = [], [], []
-    window = max(1, int(cfg.get("paper_encoding", {}).get("local_window_segments", 4)))
+    encoding = cfg.get("paper_encoding", {})
+    window = max(1, int(encoding.get("local_window_segments", 4)))
+    actor_genes = slice(0, len(conflicts)) if stage == 2 else None
+    if stage == 2:
+        lower.extend([0.0] * len(conflicts))
+        upper.extend([2.0] * len(conflicts))
     for fid in flight_ids:
         plan = by_id[fid]
         indices, conflict_indices, conflict_segments = [], {}, {}
@@ -168,10 +190,10 @@ def _build_layout(plans, flight_ids, conflicts, cfg, grid, stage, initial_plans=
             indices.append(idx)
             conflict_indices[ci] = idx
             conflict_segments[ci] = list(range(max(0, idx - window), min(len(plan.path) - 1, idx + window)))
-        activation_genes = slice(len(lower), len(lower) + 3) if stage == 1 else None
+        strategy_gene = len(lower) if stage == 1 else None
         if stage == 1:
-            lower.extend([0.0] * 3)
-            upper.extend([1.0] * 3)
+            lower.append(0.0)
+            upper.append(3.0)
         atd_gene = len(lower)
         lo, hi = paper_atd_bounds(original[fid], cfg)
         lower.append(lo)
@@ -183,26 +205,23 @@ def _build_layout(plans, flight_ids, conflicts, cfg, grid, stage, initial_plans=
         speed_genes = slice(len(lower), len(lower) + len(segments))
         lower.extend([cfg["optimization"]["speed_range"][0]] * len(segments))
         upper.extend([cfg["optimization"]["speed_range"][1]] * len(segments))
-        intervals = _local_intervals(indices, len(plan.path), window)
+        intervals = _local_intervals(indices, len(plan.path), window, int(encoding.get("reroute_merge_window", 5)))
         if stage == 1 and not intervals and len(plan.path) > 1:
             intervals = _local_intervals([len(plan.path) // 2], len(plan.path), window)
         route_genes = []
-        enable_genes = []
-        for _ in intervals:
-            if stage == 2:
-                enable_genes.append(len(lower))
-                lower.append(0.0)
-                upper.append(1.0)
+        for start, end in intervals:
             route_genes.append(slice(len(lower), len(lower) + 3))
-            # Paper x/y/z are 1-based [1,60]/[1,60]/[1,4]. Internal
-            # coordinates subtract one: [0,59]/[0,59]/[0,3].
-            lower.extend([0.0, 0.0, 0.0])
-            upper.extend([float(s - 1) for s in grid.shape])
+            points = [plan.path[start], plan.path[end]] + [plan.path[idx] for idx in indices if start <= idx <= end]
+            if len(points) == 2:
+                points.append(plan.path[(start + end) // 2])
+            margin = np.array([encoding.get("local_margin_xy", 5)] * 2 + [encoding.get("local_margin_z", 1)])
+            lower.extend(np.maximum(0, np.min(points, axis=0) - margin).astype(float))
+            upper.extend(np.minimum(np.array(grid.shape) - 1, np.max(points, axis=0) + margin).astype(float))
         route_windows = {ci: next(wi for wi, (start, end) in enumerate(intervals) if start <= idx <= end)
                          for ci, idx in conflict_indices.items() if intervals}
-        blocks.append(PaperFlightBlock(fid, activation_genes, atd_gene, speed_genes, segments,
-            route_genes, intervals, list(conflict_indices), conflict_segments, route_windows, enable_genes))
-    return PaperDecisionLayout(blocks, np.asarray(lower), np.asarray(upper), len(conflicts))
+        blocks.append(PaperFlightBlock(fid, strategy_gene, atd_gene, speed_genes, segments,
+            route_genes, intervals, list(conflict_indices), conflict_segments, route_windows))
+    return PaperDecisionLayout(blocks, np.asarray(lower), np.asarray(upper), len(conflicts), actor_genes, tuple(conflicts))
 
 
 def build_stage1_decision_layout(plans, key_ids, conflicts, cfg, grid):
@@ -216,6 +235,56 @@ def build_stage2_decision_layout(stage1_plans, conflicts, cfg, grid, initial_pla
 
 class InfeasiblePaperRoute(ValueError):
     pass
+
+
+class CandidatePlanView(Sequence):
+    """A stage's immutable base references plus copies of selected actors only."""
+
+    def __init__(self, base, overrides=None):
+        self.base = base
+        self.overrides = {} if overrides is None else overrides
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return list(self)[index]
+        plan = self.base[index]
+        return self.overrides.get(plan.id, plan)
+
+
+class RerouteLRU:
+    def __init__(self, maxsize=32768, profile=None, enabled=True):
+        self.maxsize = maxsize
+        self.profile = profile or PerformanceCounters()
+        self.enabled = enabled
+        self.entries = OrderedDict()
+        self.environment = None
+
+    def bind(self, grid, risk, cfg):
+        self.environment = (hashlib.sha256(grid.obstacles.tobytes()).hexdigest(),
+                            hashlib.sha256(risk.tobytes()).hexdigest(), tuple(grid.shape),
+                            tuple(grid.cell_size), cfg["risk"]["alpha_r"], cfg["risk"]["alpha_L"])
+
+    def route(self, start, via, end, grid, risk, cfg):
+        key = (start, via, end, self.environment)
+        if self.enabled and key in self.entries:
+            self.profile.values["astar_cache_hits"] += 1
+            self.entries.move_to_end(key)
+            return self.entries[key]
+        self.profile.values["astar_cache_misses"] += 1
+        options = dict(alpha_r=cfg["risk"]["alpha_r"], alpha_l=cfg["risk"]["alpha_L"])
+        with self.profile.measure("astar"):
+            first = astar_path(grid, start, via, risk, **options)
+        with self.profile.measure("astar"):
+            second = astar_path(grid, via, end, risk, **options)
+        local = first + second[1:] if first and second else None
+        if self.enabled:
+            self.entries[key] = local
+            if len(self.entries) > self.maxsize:
+                self.entries.popitem(last=False)
+        return local
 
 
 def _valid_route(path, plan, grid):
@@ -235,23 +304,9 @@ def _via_route(plan, block, vector, grid, risk_map, cfg, route_cache, active_win
             raise InfeasiblePaperRoute("Via-cell intersects an obstacle")
         endpoints = plan.path[start], plan.path[end]
         original_local = plan.path[start:end + 1]
-        if via == original_local[len(original_local) // 2]:
-            local = original_local
-        else:
-            local = None
-        key = (endpoints, via)
-        if local is None:
-            local = route_cache.get(key)
-        if local is None:
-            options = dict(alpha_r=cfg["risk"]["alpha_r"], alpha_l=cfg["risk"]["alpha_L"])
-            first = astar_path(grid, endpoints[0], via, risk_map, **options)
-            second = astar_path(grid, via, endpoints[1], risk_map, **options)
-            if not first or not second:
-                raise InfeasiblePaperRoute("Via-cell is unreachable")
-            local = first + second[1:]
-            if len(route_cache) >= 4096:
-                route_cache.clear()
-            route_cache[key] = local
+        local = route_cache.route(endpoints[0], via, endpoints[1], grid, risk_map, cfg)
+        if not local:
+            raise InfeasiblePaperRoute("Via-cell is unreachable")
         path.extend(plan.path[cursor:start])
         speeds.extend(plan.speed_profile[cursor:start])
         path.extend(local[:-1])
@@ -284,12 +339,16 @@ def _decode(vector, base_plans, initial_plans, layout, cfg, grid, risk_map, stra
     if vector.shape != (layout.dim,):
         raise ValueError("Incorrect paper decision vector dimension")
     original = {p.id: p for p in initial_plans}
-    out = list(base_plans)
-    slots = {p.id: i for i, p in enumerate(out)}
-    cache = {} if route_cache is None else route_cache
-    matches = None if strategies is None else stage2_flight_strategies(layout, strategies)
+    out = CandidatePlanView(base_plans)
+    slots = {p.id: i for i, p in enumerate(base_plans)}
+    cache = RerouteLRU() if route_cache is None else route_cache
+    cache.bind(grid, risk_map, cfg)
+    requirements = None if strategies is None else flight_strategy_requirements(layout, strategies, vector[layout.actor_genes])
     for block in layout.blocks:
-        active = decode_activation_genes(vector[block.activation_genes]) if matches is None else matches[block.flight_id]
+        required = None if requirements is None else requirements.get(block.flight_id, {})
+        active = (decode_primary_strategy(vector[block.strategy_gene]),) if requirements is None else tuple(sorted(required))
+        if not active:
+            continue
         base = base_plans[slots[block.flight_id]]
         initial = original[block.flight_id]
         plan = copy.copy(base)
@@ -299,17 +358,16 @@ def _decode(vector, base_plans, initial_plans, layout, cfg, grid, risk_map, stra
         if 0 in active:
             plan.atd = float(vector[block.atd_gene])
         if 1 in active:
-            selected_segments = set(block.segment_indices) if matches is None else {
-                j for ci in block.incident_conflicts if strategies[ci] == 1 for j in block.conflict_segments[ci]}
+            selected_segments = set(block.segment_indices) if requirements is None else {
+                j for ci in required.get(1, ()) for j in block.conflict_segments[ci]}
             for segment, value in zip(block.segment_indices, vector[block.speed_genes]):
                 if segment in selected_segments:
                     plan.speed_profile[segment] = float(value)
         if 2 in active:
-            active_windows = None if matches is None else {
-                block.conflict_route_windows[ci] for ci in block.incident_conflicts if strategies[ci] == 2
-                and vector[block.reroute_enable_genes[block.conflict_route_windows[ci]]] >= 0.5}
+            active_windows = None if requirements is None else {
+                block.conflict_route_windows[ci] for ci in required.get(2, ())}
             plan.path, plan.speed_profile = _via_route(plan, block, vector, grid, risk_map, cfg, cache, active_windows)
-        plan.paper_stage2_strategies = active if matches is not None else ()
+        plan.paper_stage2_strategies = active if requirements is not None else ()
         plan.paper_strategies = tuple(sorted(set(flight_strategies(base)) | set(active)))
         plan.paper_strategy = plan.paper_strategies[0] if len(plan.paper_strategies) == 1 else None
         plan.delay = plan.atd - initial.etd
@@ -318,7 +376,7 @@ def _decode(vector, base_plans, initial_plans, layout, cfg, grid, risk_map, stra
             raise InfeasiblePaperRoute("Route violates endpoints, obstacles or 26-neighborhood")
         _recompute_paper_timing(plan, grid, risk_map)
         plan.changed = plan.rerouted or abs(plan.delay) > 1e-6 or len(plan.speed_profile) != len(initial.speed_profile) or not np.allclose(plan.speed_profile, initial.speed_profile, atol=1e-6, rtol=0.0)
-        out[slots[plan.id]] = plan
+        out.overrides[plan.id] = plan
     return out
 
 
@@ -356,6 +414,27 @@ def evaluate_stage2_paper_solution(vector, stage1_plans, initial_plans, layout, 
     return _evaluate(decoded, initial_plans, cfg, risk_map, reference, n_gen, n_gen_max)
 
 
+class PaperContributionCache:
+    def __init__(self, base, initial, risk, cfg):
+        self.base = {p.id: p for p in base}
+        self.initial = {p.id: p for p in initial}
+        self.risk, self.cfg = risk, cfg
+        self.cached = {p.id: self.contribution(p) for p in base}
+
+    def contribution(self, plan):
+        delay = abs(self.initial[plan.id].etd - plan.atd)
+        air = plan.eta_times[-1] - plan.atd
+        return (delay, air, tuple(float(self.risk[c]) for c in plan.path),
+                int(plan.atd > self.initial[plan.id].etd + 1e-6), int(air > self.cfg["optimization"]["t_battery"]))
+
+    def evaluate(self, plans, conflicts):
+        values = [self.cached[p.id] if p is self.base[p.id] else self.contribution(p) for p in plans]
+        # Preserve full-detector objective summation order, including cell visits.
+        return dict(Tdelay=sum(v[0] for v in values), Tair=sum(v[1] for v in values),
+                    ORISK=sum(r for v in values for r in v[2]), Nc=len(conflicts),
+                    n_delay=sum(v[3] for v in values), n_battery=sum(v[4] for v in values))
+
+
 @dataclass
 class PaperPopulationObjective:
     base_plans: list[FlightPlan]
@@ -367,15 +446,30 @@ class PaperPopulationObjective:
     reference: PaperReference
     max_gen: int
     stage: int
-    route_cache: dict = field(default_factory=dict)
+    profile: PerformanceCounters = field(default_factory=PerformanceCounters)
+
+    def __post_init__(self):
+        self.base_plans = tuple(self.base_plans)
+        self.initial_plans = tuple(self.initial_plans)
+        self.modified_ids = {b.flight_id for b in self.layout.blocks}
+        self.incremental = IncrementalConflictEvaluator(self.base_plans, self.modified_ids, self.cfg)
+        self.contributions = PaperContributionCache(self.base_plans, self.initial_plans, self.risk_map, self.cfg)
+        self.route_cache = RerouteLRU(int(self.cfg.get("paper_encoding", {}).get("astar_cache_size", 32768)), self.profile,
+                                      self.cfg.get("paper_performance", {}).get("reroute_cache", True))
 
     def evaluation(self, vector, generation, context=None):
-        if self.stage == 1:
-            return evaluate_stage1_paper_solution(vector, self.initial_plans, self.layout, self.cfg, self.grid,
-                self.risk_map, self.reference, generation, self.max_gen, self.route_cache)
-        strategies = context
-        return evaluate_stage2_paper_solution(vector, self.base_plans, self.initial_plans, self.layout, strategies,
-            self.cfg, self.grid, self.risk_map, self.reference, generation, self.max_gen, self.route_cache)
+        with self.profile.measure("route_decode"):
+            plans = _decode(vector, self.base_plans, self.initial_plans, self.layout, self.cfg,
+                            self.grid, self.risk_map, context if self.stage == 2 else None, self.route_cache)
+        with self.profile.measure("conflict_detection"):
+            conflicts = (self.incremental.evaluate(plans) if self.cfg.get("paper_performance", {}).get("incremental_conflicts", True)
+                         else detect_conflicts(plans, self.cfg, uncertain=True))
+        with self.profile.measure("objective"):
+            components = (self.contributions.evaluate(plans, conflicts) if self.cfg.get("paper_performance", {}).get("objective_cache", True)
+                          else paper_objective_components(plans, self.initial_plans, self.risk_map, conflicts, self.cfg))
+            fitness = paper_fitness(components, self.reference, self.cfg, generation, self.max_gen)
+        return PaperEvaluation(fitness, components, plans, conflicts,
+                               conflict_weight_delta(generation, self.max_gen, self.cfg["fata"]["gamma"]))
 
     def fitness(self, vector, generation):
         try:

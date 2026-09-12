@@ -146,11 +146,18 @@ def detect_conflicts(
     global _DETECT_CALLS, _DETECT_TIME_SECONDS
     started = time.perf_counter()
     _DETECT_CALLS += 1
-    t_conflict = float(cfg["conflict"]["t_conflict"]) + float(cfg["conflict"].get("cell_occupancy_time", 0.0))
-    alpha = float(cfg["conflict"]["alpha"])
-    z_score = NormalDist().inv_cdf(1.0 - alpha / 2.0)
     by_id = {plan.id: plan for plan in plans}
     occupancy_by_cell = build_occupancy_events(plans, cfg, uncertain=uncertain)
+    conflicts = _detect_indexed_conflicts(occupancy_by_cell, by_id, cfg, uncertain, active_ids)
+    if output_csv is not None:
+        write_conflicts_csv(conflicts, output_csv)
+    _DETECT_TIME_SECONDS += time.perf_counter() - started
+    return conflicts
+
+
+def _detect_indexed_conflicts(occupancy_by_cell, by_id, cfg, uncertain, active_ids=None):
+    t_conflict = float(cfg["conflict"]["t_conflict"]) + float(cfg["conflict"].get("cell_occupancy_time", 0.0))
+    z_score = NormalDist().inv_cdf(1.0 - float(cfg["conflict"]["alpha"]) / 2.0)
     if uncertain:
         max_sigma = max((sigma_t(event.t_nominal - by_id[event.plan_id].etd, cfg) for events in occupancy_by_cell.values() for event in events), default=0.0)
         time_window = t_conflict + z_score * 2.0 * max_sigma
@@ -202,10 +209,39 @@ def detect_conflicts(
                     )
                 )
 
-    if output_csv is not None:
-        write_conflicts_csv(conflicts, output_csv)
-    _DETECT_TIME_SECONDS += time.perf_counter() - started
     return conflicts
+
+
+class IncrementalConflictEvaluator:
+    """Cache static pairs and occupancy; use the unchanged detector kernel."""
+
+    def __init__(self, base_plans, modified_ids, cfg, uncertain=True):
+        self.base = tuple(base_plans)
+        self.modified_ids = frozenset(modified_ids)
+        self.cfg, self.uncertain = cfg, uncertain
+        self.slots = {p.id: i for i, p in enumerate(self.base)}
+        static = [p for p in self.base if p.id not in self.modified_ids]
+        self.static_events = build_occupancy_events(static, cfg, uncertain)
+        self.static_conflicts = detect_conflicts(static, cfg, uncertain)
+        self.cell_ranks = {c: i for i, c in enumerate(dict.fromkeys(c for p in self.base for c in p.path))}
+
+    def evaluate(self, candidate):
+        dynamic = [p for p in candidate if p.id in self.modified_ids]
+        by_id = {p.id: p for p in candidate}
+        events = build_occupancy_events(dynamic, self.cfg, self.uncertain)
+        for cell, values in events.items():
+            values.extend(self.static_events.get(cell, ()))
+            values.sort(key=lambda e: (e.t_nominal, self.slots[e.plan_id], e.idx))
+        conflicts = list(self.static_conflicts) + _detect_indexed_conflicts(
+            events, by_id, self.cfg, self.uncertain, self.modified_ids)
+        ranks = self.cell_ranks
+        if any(p.path != self.base[self.slots[p.id]].path for p in dynamic):
+            ranks = {c: i for i, c in enumerate(dict.fromkeys(c for p in candidate for c in p.path))}
+        def order(c):
+            endpoints = sorted(((c.time_a, self.slots[c.plan_a], c.idx_a),
+                                (c.time_b, self.slots[c.plan_b], c.idx_b)))
+            return ranks[c.cell], endpoints[0], endpoints[1]
+        return sorted(conflicts, key=order)
 
 
 def write_conflicts_csv(conflicts: list[Conflict], output_csv: str | Path) -> None:

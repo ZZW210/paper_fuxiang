@@ -4,10 +4,28 @@ import base64
 import csv
 import html
 import statistics
+import argparse
+import json
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-OUT = BASE / "outputs"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--outputs", default="outputs")
+parser.add_argument("--run-id", default=None)
+parser.add_argument("--historical-output", action="store_true")
+args = parser.parse_args()
+output_root = BASE / args.outputs
+if args.historical_output:
+    OUT = output_root
+else:
+    from src.run_archive import validate_run_id
+
+    run_id = args.run_id or (output_root / "latest_run.txt").read_text(encoding="utf-8").strip()
+    validate_run_id(run_id)
+    OUT = output_root / "runs" / run_id
+    manifest = json.loads((OUT / "run_manifest.json").read_text(encoding="utf-8"))
+    if manifest["status"] != "completed" or manifest["run_id"] != run_id:
+        raise ValueError("Reports require a completed, matching run manifest")
 REPORT = OUT / "fata_run_report.html"
 
 
@@ -26,6 +44,8 @@ def fmt(v, nd=4):
 def img_tag(name: str, alt: str, caption: str | None = None) -> str:
     """将 PNG 以 base64 内嵌为 HTML 图片卡片。"""
     path = OUT / name
+    if not path.exists():
+        path = OUT / "figures" / name
     if not path.exists():
         return f'<div class="card"><div class="img-missing">缺少图片 {html.escape(name)}</div></div>'
     b64 = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -67,6 +87,10 @@ def card(title: str, body: str) -> str:
 # ---------------------------------------------------------------- 读取数据
 m = read_csv("metrics_summary.csv")[0]
 if m.get("scheduler_mode") == "paper_strict":
+    if not m.get("run_id") or args.historical_output:
+        raise ValueError("Current strict reports require archived run_id data, not historical root metrics")
+    if m["run_id"] != manifest["run_id"]:
+        raise ValueError("Metrics run_id differs from the manifest")
     from src.paper_consistency import write_paper_html_report
 
     write_paper_html_report(OUT, m)
