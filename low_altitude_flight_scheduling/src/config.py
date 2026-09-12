@@ -94,6 +94,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "optimization": {
         "scheduler_mode": "paper_strict",
+        "paper_objective_scale_mode": "raw_equation",
         "n_jobs": 8,
         "legacy_stage1_key_ratio": 0.15,
         "legacy_stage1_key_selection_mode": "coverage_adaptive",

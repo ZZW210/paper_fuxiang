@@ -83,6 +83,7 @@ conflict:
 
 optimization:
   scheduler_mode: "paper_strict"
+  paper_objective_scale_mode: "raw_equation"
   n_jobs: 8
   x_range: [1, 60]
   y_range: [1, 60]

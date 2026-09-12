@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import fata
-from .adm_matching import ADMResult, Strategy, adm_fata_optimize
+from .adm_matching import ADMResult, adm_fata_optimize
 from .conflict_detection import (detect_conflicts, count_conflict_pairs, write_calibration_report,
                                  write_conflict_diagnostics)
 from .conflict_network import (build_conflict_network, network_metrics, run_attack_suite,
@@ -21,7 +21,7 @@ from .flight_plan import generate_flight_plans, write_flight_generation_report
 from .grid import AirspaceGrid
 from .paper_optimization import (PaperPopulationObjective, PaperReference, PaperEvaluation,
                                 build_stage1_decision_layout, build_stage2_decision_layout,
-                                paper_objective_components, paper_fitness, conflict_weight_delta)
+                                paper_objective_components, paper_fitness, conflict_weight_delta, flight_strategies)
 from .risk_map import generate_risk_map
 from .utils import ensure_dir, set_random_seed
 from .visualization import write_all_route_visuals, write_strategy_overview_html
@@ -79,7 +79,7 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
     start = time.perf_counter()
     adm = None
     if stage1.conflicts:
-        layout2 = build_stage2_decision_layout(plans, stage1.conflicts, cfg, grid)
+        layout2 = build_stage2_decision_layout(stage1.plans, stage1.conflicts, cfg, grid, plans)
         objective2 = PaperPopulationObjective(stage1.plans, plans, layout2, cfg, grid, risk_map, reference, generations2, 2)
         adm = adm_fata_optimize(stage1.plans, plans, stage1.conflicts, layout2, cfg, grid, risk_map,
                                 reference, seed=cfg["flight"]["random_seed"] + 206,
@@ -96,12 +96,28 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
     return PaperScheduleResult(stage1, final, adm, seconds1, time.perf_counter() - start, trace)
 
 
-def _strategy_name(value):
-    return Strategy(int(value)).name.lower()
+def _strategy_name(values):
+    names = ("schedule", "speed", "reroute")
+    if isinstance(values, (int, np.integer)):
+        return names[int(values)]
+    return '+'.join(names[int(s)] for s in values)
 
 
 def _counts(assignments):
-    return {name: sum(int(s) == i for s in assignments.values()) for i, name in enumerate(("schedule", "speed", "reroute"))}
+    return {name: sum(i in active for active in assignments.values()) for i, name in enumerate(("schedule", "speed", "reroute"))}
+
+
+def timing_shift_diagnostics(initial, final):
+    original = {p.id: p for p in initial}
+    shifts = np.asarray([p.atd - original[p.id].etd for p in final])
+    return dict(advanced_flight_count=int(np.sum(shifts < -1e-6)),
+                delayed_flight_count=int(np.sum(shifts > 1e-6)),
+                mean_absolute_atd_shift=float(np.mean(np.abs(shifts))) if len(shifts) else 0.0,
+                max_absolute_atd_shift=float(np.max(np.abs(shifts))) if len(shifts) else 0.0)
+
+
+def _physically_changed(before, after):
+    return abs(before.atd - after.atd) > 1e-6 or before.path != after.path or len(before.speed_profile) != len(after.speed_profile) or not np.allclose(before.speed_profile, after.speed_profile, atol=1e-6, rtol=0.0)
 
 
 def write_paper_diagnostics(out, result, initial, key_ids, ranked_metrics, cfg):
@@ -113,7 +129,7 @@ def write_paper_diagnostics(out, result, initial, key_ids, ranked_metrics, cfg):
             continue
         base = original[plan.id]
         changed_segments = sum(abs(a - b) > 1e-6 for a, b in zip(plan.speed_profile, base.speed_profile)) if not plan.rerouted else 0
-        assignment.append(dict(flight_id=plan.id, CI_rank=ranks[plan.id], strategy=_strategy_name(plan.paper_strategy),
+        assignment.append(dict(flight_id=plan.id, CI_rank=ranks[plan.id], strategy=_strategy_name(flight_strategies(plan)),
                                ATD=plan.atd, changed_segments=changed_segments, rerouted=plan.rerouted,
                                fitness=result.stage1.fitness))
     pd.DataFrame(assignment, columns=["flight_id", "CI_rank", "strategy", "ATD", "changed_segments", "rerouted", "fitness"]).to_csv(out / "paper_stage1_strategy_assignment.csv", index=False)
@@ -125,11 +141,21 @@ def write_paper_diagnostics(out, result, initial, key_ids, ranked_metrics, cfg):
             conflict_rows.append(dict(conflict_id=i, plan_a=conflict.plan_a, plan_b=conflict.plan_b,
                                       cell_x=conflict.cell[0], cell_y=conflict.cell[1], cell_z=conflict.cell[2],
                                       P_schedule=p[0], P_speed=p[1], P_reroute=p[2],
-                                      selected_strategy=_strategy_name(adm.best_strategies[i]), target_flight=adm.conflict_owners[i]))
+                                      selected_strategy=_strategy_name(adm.best_strategies[i])))
         for generation, matrix in enumerate(adm.probability_history):
             for i, p in enumerate(matrix):
                 probability_rows.append(dict(generation=generation, conflict_id=i, P_schedule=p[0], P_speed=p[1], P_reroute=p[2]))
-    pd.DataFrame(conflict_rows, columns=["conflict_id", "plan_a", "plan_b", "cell_x", "cell_y", "cell_z", "P_schedule", "P_speed", "P_reroute", "selected_strategy", "target_flight"]).to_csv(out / "paper_stage2_conflict_strategy.csv", index=False)
+    pd.DataFrame(conflict_rows, columns=["conflict_id", "plan_a", "plan_b", "cell_x", "cell_y", "cell_z", "P_schedule", "P_speed", "P_reroute", "selected_strategy"]).to_csv(out / "paper_stage2_conflict_strategy.csv", index=False)
+    stage1_map = {p.id: p for p in result.stage1.plans}
+    history = []
+    for plan in result.final.plans:
+        stage1_active = flight_strategies(stage1_map[plan.id])
+        stage2_active = result.adm.best_flight_strategies.get(plan.id, ()) if result.adm else ()
+        row = {"flight_id": plan.id}
+        for stage, active in (("stage1", stage1_active), ("stage2", stage2_active), ("final", flight_strategies(plan))):
+            row.update({f"{stage}_{name}": int(i in active) for i, name in enumerate(("schedule", "speed", "reroute"))})
+        history.append(row)
+    pd.DataFrame(history).to_csv(out / "paper_flight_strategy_history.csv", index=False)
     pd.DataFrame(probability_rows, columns=["generation", "conflict_id", "P_schedule", "P_speed", "P_reroute"]).to_csv(out / "adm_probability_history.csv", index=False)
     columns = ["global_generation", "stage", "stage_generation", "fitness", "Nc", "Tdelay", "Tair", "ORISK", "delta", "n_delay", "n_battery"]
     pd.DataFrame(result.convergence, columns=columns).to_csv(out / "paper_convergence.csv", index=False)
@@ -182,11 +208,12 @@ def run_paper_main(cfg, args, root: Path):
     print(f"paper_strict: NP={cfg['fata']['NP']}, generations={cfg['fata']['Ngen_max_stage1']}+"
           f"{cfg['fata']['Ngen_max_stage2']}, n_jobs={cfg['optimization']['n_jobs']}", flush=True)
     result = optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map)
-    stage1_assignments = {p.id: p.paper_strategy for p in result.stage1.plans if p.id in key_ids}
+    stage1_assignments = {p.id: flight_strategies(p) for p in result.stage1.plans if p.id in key_ids}
     stage2_assignments = result.adm.best_flight_strategies if result.adm else {}
     counts1, counts2 = _counts(stage1_assignments), _counts(stage2_assignments)
     summary = dict(
         scheduler_mode="paper_strict", seed=args.seed, n_jobs=cfg["optimization"]["n_jobs"],
+        paper_objective_scale_mode=cfg["optimization"]["paper_objective_scale_mode"],
         NP=cfg["fata"]["NP"], Ngen_max_stage1=cfg["fata"]["Ngen_max_stage1"], Ngen_max_stage2=cfg["fata"]["Ngen_max_stage2"],
         stage2_skipped=result.adm is None, initial_conflicts_uncertain=len(conflicts),
         initial_conflicts_without_uncertainty=len(conflicts_no), initial_conflict_points_uncertain=len(conflicts),
@@ -201,7 +228,16 @@ def run_paper_main(cfg, args, root: Path):
         stage2_fata_time=result.stage2_seconds, final_fitness=result.final.fitness, final_paper_fitness=result.final.fitness,
         changed_flight_count_two_stage=sum(p.changed for p in result.final.plans),
         changed_flight_count_one_stage=sum(p.changed for p in result.stage1.plans), delayed_flight_count=result.final.components["n_delay"],
+        stage1_strategy_combination_count=sum(len(s) > 1 for s in stage1_assignments.values()),
+        stage2_strategy_combination_count=sum(len(s) > 1 for s in stage2_assignments.values()),
+        stage1_schedule_only_count=sum(s == (0,) for s in stage1_assignments.values()),
+        stage1_actual_rerouted_flight_count=sum(p.path != original.path for p, original in zip(result.stage1.plans, plans)),
+        stage2_actual_rerouted_flight_count=sum(p.path != base.path for p, base in zip(result.final.plans, result.stage1.plans)),
+        stage2_modified_flight_count=sum(_physically_changed(base, p) for base, p in zip(result.stage1.plans, result.final.plans)),
+        stage2_newly_changed_flight_count=sum(not base.changed and p.changed for base, p in zip(result.stage1.plans, result.final.plans)),
     )
+    summary.update(timing_shift_diagnostics(plans, result.final.plans))
+    summary["large_advance_without_delay_observed"] = bool(result.final.components["n_delay"] == 0 and result.final.components["Tdelay"] > 20000)
     for key, value in result.final.components.items():
         if key != "Nc":
             summary[f"final_{key}"] = value
@@ -230,15 +266,19 @@ def run_paper_main(cfg, args, root: Path):
     write_paper_html_report(out, summary)
     print("Main metrics summary")
     print(f"Stage 1 strategies: {counts1}")
+    print(f"Stage 1 combinations: {summary['stage1_strategy_combination_count']}")
     if result.adm:
         print("Stage 2 final ADM probabilities:")
         print(np.array2string(result.adm.final_probability, threshold=result.adm.final_probability.size, precision=4))
     print(f"Stage 2 strategies: {counts2}")
+    print(f"Stage 2 combinations: {summary['stage2_strategy_combination_count']}")
     print(f"Final conflicts: {len(result.final.conflicts)}")
     for key, value in result.final.components.items():
         if key != "Nc":
             print(f"{key}: {value}")
     print(f"paper fitness: {result.final.fitness:.8f}")
+    for key in ("paper_objective_scale_mode", "changed_flight_count_two_stage", "advanced_flight_count", "delayed_flight_count", "mean_absolute_atd_shift", "max_absolute_atd_shift", "large_advance_without_delay_observed"):
+        print(f"{key}: {summary[key]}")
     print(f"Stage1 runtime: {result.stage1_seconds:.3f}")
     print(f"Stage2 runtime: {result.stage2_seconds:.3f}")
     print(f"Total runtime: {summary['total_runtime']:.3f}")

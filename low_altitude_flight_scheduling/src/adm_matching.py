@@ -8,7 +8,7 @@ import numpy as np
 
 from . import fata
 from .conflict_detection import Conflict
-from .paper_optimization import PaperPopulationObjective
+from .paper_optimization import PaperPopulationObjective, stage2_flight_strategies
 
 
 class Strategy(IntEnum):
@@ -39,9 +39,8 @@ class ADMResult:
     best_fitness: float
     probability_history: list[np.ndarray]
     convergence: list[float]
-    best_flight_strategies: dict[int, int]
+    best_flight_strategies: dict[int, tuple[int, ...]]
     final_probability: np.ndarray
-    conflict_owners: list[int]
 
 
 def initialize_probability_matrix(n_conflicts):
@@ -53,28 +52,6 @@ def sample_strategy_species(probability, population, rng):
         raise ValueError("Probability matrix must have three strategy columns")
     draws = rng.random((population, len(probability)))
     return np.sum(draws[:, :, None] >= np.cumsum(probability, axis=1)[None, :, :], axis=2).clip(0, 2)
-
-
-def enforce_single_strategy_per_flight(conflicts, sampled_strategies, probability, owners=None):
-    """Reconcile sampled proposals by probability-weighted votes, with ID ties.
-
-    Endpoint ownership and reconciliation are implementation assumptions. Voting
-    only on sampled labels preserves exploration at the uniform initialization;
-    an unconditional argmax of P alone would ignore every sampled species.
-    """
-    if owners is None:
-        owners = [c.plan_a if i % 2 == 0 else c.plan_b for i, c in enumerate(conflicts)]
-    if len(owners) != len(conflicts) or len(sampled_strategies) != len(conflicts):
-        raise ValueError("Each conflict needs an owner and a strategy")
-    scores = {}
-    for i, (conflict, owner, strategy) in enumerate(zip(conflicts, owners, sampled_strategies)):
-        if owner not in (conflict.plan_a, conflict.plan_b):
-            raise ValueError("Owner must be an endpoint of the conflict")
-        vote = scores.setdefault(owner, np.zeros(3))
-        vote[int(strategy)] += probability[i, int(strategy)]
-    flight_strategies = {fid: int(np.argmax(score)) for fid, score in scores.items()}
-    consistent = np.asarray([flight_strategies[fid] for fid in owners], dtype=int)
-    return consistent, flight_strategies
 
 
 def update_probability_matrix(probability, dominant_species, learning_rate=0.5):
@@ -96,7 +73,6 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
     max_gen = int(cfg["fata"]["Ngen_max_stage2"])
     probability = initialize_probability_matrix(len(conflicts))
     history = [probability.copy()]
-    owners = [c.plan_a if i % 2 == 0 else c.plan_b for i, c in enumerate(conflicts)]
     objective = PaperPopulationObjective(stage1_plans, initial_plans, layout, cfg, grid, risk_map,
                                           reference, max_gen, 2)
     fraction = float(cfg["adm"]["dominant_fraction"])
@@ -105,12 +81,7 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
     dominant_no = max(1, round(population * fraction))
 
     def generate_context(generation, size, rng):
-        sampled = sample_strategy_species(probability, size, rng)
-        contexts = []
-        for proposals in sampled:
-            consistent, flight_strategies = enforce_single_strategy_per_flight(conflicts, proposals, probability, owners)
-            contexts.append(np.concatenate([consistent, [flight_strategies.get(b.flight_id, -1) for b in layout.blocks]]))
-        return np.asarray(contexts, dtype=int)
+        return sample_strategy_species(probability, size, rng)
 
     def update(generation, positions, fitness, contexts):
         nonlocal probability
@@ -119,8 +90,8 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
         ranked = np.argsort(fitness, kind="stable")
         ranked = ranked[np.isfinite(fitness[ranked])][:dominant_no]
         if len(ranked):
-            species = np.asarray(contexts)[ranked, :len(conflicts)]
-            probability = update_probability_matrix(probability, species, cfg["adm"]["learning_rate"])
+            dominant_species = np.asarray(contexts)[ranked]
+            probability = update_probability_matrix(probability, dominant_species, cfg["adm"]["learning_rate"])
         history.append(probability.copy())
 
     result = fata.fata_optimize_paper(
@@ -133,6 +104,6 @@ def adm_fata_optimize(stage1_plans, initial_plans, conflicts, layout, cfg, grid,
     if not np.isfinite(result.best_fitness):
         raise RuntimeError("Stage 2 found no geometrically feasible candidate")
     evaluation = objective.evaluation(result.best_position, max_gen, result.best_context)
-    flight_strategies = {block.flight_id: int(s) for block, s in zip(layout.blocks, result.best_context[len(conflicts):]) if s >= 0}
-    return ADMResult(result.best_context[:len(conflicts)], result.best_position, evaluation.plans,
-                     evaluation.fitness, history, result.convergence, flight_strategies, probability, owners)
+    flight_strategies = stage2_flight_strategies(layout, result.best_context)
+    return ADMResult(result.best_context.copy(), result.best_position, evaluation.plans,
+                     evaluation.fitness, history, result.convergence, flight_strategies, probability)

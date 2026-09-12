@@ -8,7 +8,7 @@ import pytest
 
 from src import fata, optimization_model
 from src.adm_matching import (initialize_probability_matrix, sample_strategy_species,
-                             enforce_single_strategy_per_flight, update_probability_matrix)
+                             update_probability_matrix)
 from src.config import load_config, apply_quick_overrides
 from src.conflict_detection import detect_conflicts
 from src.conflict_network import select_paper_key_flights
@@ -16,7 +16,8 @@ from src.flight_plan import FlightPlan, compute_eta_times
 from src.grid import AirspaceGrid
 from src.paper_optimization import (PaperReference, paper_atd_bounds, paper_objective_components,
     paper_fitness, conflict_weight_delta, build_stage1_decision_layout, build_stage2_decision_layout,
-    decode_stage1_solution, decode_stage2_solution, InfeasiblePaperRoute)
+    decode_stage1_solution, decode_stage2_solution, InfeasiblePaperRoute,
+    decode_activation_genes, flight_strategies, stage2_flight_strategies)
 from src.paper_scheduler import optimize_paper_schedule
 
 
@@ -44,7 +45,7 @@ def test_atd_early_and_late_absolute_delay(scenario, atd):
     cfg, grid, risk, plans, conflicts = scenario
     layout = build_stage1_decision_layout(plans, [0], conflicts, cfg, grid)
     vector = _vector(layout)
-    vector[layout.blocks[0].strategy_gene] = 0.2
+    vector[layout.blocks[0].activation_genes] = [1, 0, 0]
     vector[layout.blocks[0].atd_gene] = atd
     decoded = decode_stage1_solution(vector, plans, layout, cfg, grid, risk)
     assert decoded[0].atd == atd
@@ -70,7 +71,7 @@ def test_continuous_per_segment_speed(scenario):
     layout = build_stage1_decision_layout(plans, [0], conflicts, cfg, grid)
     vector = _vector(layout)
     block = layout.blocks[0]
-    vector[block.strategy_gene] = 1.4
+    vector[block.activation_genes] = [0, 1, 0]
     vector[block.speed_genes] = 10.0
     vector[block.speed_genes.start + 2] = 11.374
     vector[block.atd_gene] = 700.0  # Ignored for a speed-only individual.
@@ -87,7 +88,7 @@ def test_reroute_optimized_via_and_feasibility(scenario):
     layout = build_stage1_decision_layout(plans, [0], conflicts, cfg, grid)
     vector = _vector(layout)
     block = layout.blocks[0]
-    vector[block.strategy_gene] = 2.4
+    vector[block.activation_genes] = [0, 0, 1]
     vector[block.atd_gene] = 700.0
     vector[block.speed_genes] = 19.123
     for genes in block.reroute_genes:
@@ -111,15 +112,20 @@ def test_eq49_to_51_exact_and_no_hard_conflict_penalty(scenario):
     cfg, _, _, _, _ = scenario
     reference = PaperReference(3600.0, 100.0, 12.0, 6.0)
     components = dict(Tdelay=200.0, Tair=120.0, ORISK=15.0, Nc=3, n_delay=2, n_battery=1)
-    expected_obj = 0.2 * (0.25 * 200 / 3600 + 0.25 * 1.2 + 0.5 * 15 / 12) + 0.8 * 0.9 * 0.5 * 1.2
+    expected_obj = 0.2 * (0.25 * 200 + 0.25 * 120 + 0.5 * 15) + 0.8 * 0.9 * 3 * 120
     assert paper_fitness(components, reference, cfg, 200, 200) == pytest.approx(expected_obj + 1000 + 200)
     components.update(n_delay=0, n_battery=0)
     assert paper_fitness(components, reference, cfg, 200, 200) == pytest.approx(expected_obj)
-    assert paper_fitness(components, reference, cfg, 200, 200) < 2
     cfg["optimization"].update(conflict_hard_penalty=1e20, delay_count_cap=0, max_changed_flight_ratio=0)
     assert paper_fitness(components, reference, cfg, 200, 200) == pytest.approx(expected_obj)
     assert conflict_weight_delta(200, 200) == pytest.approx(0.9)
     assert conflict_weight_delta(0, 200) == 1.0
+    cfg["optimization"]["paper_objective_scale_mode"] = "initial_reference_experimental"
+    expected_norm = 0.2 * (0.25 * 200 / 3600 + 0.25 * 1.2 + 0.5 * 15 / 12) + 0.8 * 0.9 * 0.5 * 1.2
+    assert paper_fitness(components, reference, cfg, 200, 200) == pytest.approx(expected_norm)
+    cfg["optimization"]["paper_objective_scale_mode"] = "unknown"
+    with pytest.raises(ValueError):
+        paper_fitness(components, reference, cfg, 200, 200)
 
 
 def test_delay_epsilon_and_battery(scenario):
@@ -150,33 +156,151 @@ def test_uniform_adm_independent_sampling_and_update():
     assert np.allclose(update_probability_matrix(probability, dominant), expected)
 
 
-def test_single_strategy_per_flight_and_sampling_not_ignored(scenario):
-    _, _, _, _, conflicts = scenario
-    probability = initialize_probability_matrix(len(conflicts))
-    owners = [0] * len(conflicts)
-    proposals = np.array([2] * len(conflicts))
-    consistent, flight_strategies = enforce_single_strategy_per_flight(conflicts, proposals, probability, owners)
-    assert flight_strategies == {0: 2}
-    assert np.all(consistent == 2)
-    mixed = np.array([i % 3 for i in range(len(conflicts))])
-    consistent, _ = enforce_single_strategy_per_flight(conflicts, mixed, probability, owners)
-    assert len(np.unique(consistent)) == 1
+@pytest.mark.parametrize("mask", range(1, 8))
+def test_seven_strategy_combinations(scenario, mask):
+    cfg, grid, risk, plans, conflicts = scenario
+    active = tuple(i for i in range(3) if mask & (1 << i))
+    layout = build_stage1_decision_layout(plans, [0], conflicts, cfg, grid)
+    vector = _vector(layout)
+    block = layout.blocks[0]
+    genes = [float(i in active) for i in range(3)]
+    assert decode_activation_genes(genes) == active
+    vector[block.activation_genes] = genes
+    vector[block.atd_gene] = 800
+    vector[block.speed_genes] = 11.374
+    for route in block.reroute_genes:
+        vector[route] = [4, 5, 2]
+    plan = decode_stage1_solution(vector, plans, layout, cfg, grid, risk)[0]
+    assert flight_strategies(plan) == active
+    assert plan.atd == (800 if 0 in active else 1000)
+    assert all(v == (11.374 if 1 in active else 10) for v in plan.speed_profile)
+    assert plan.rerouted == (2 in active)
+    assert decode_activation_genes([0.1, 0.3, 0.2]) == (1,)
 
 
-def test_stage2_changes_one_strategy_without_accumulating_stage1(scenario):
+def test_stage2_retains_stage1_and_opens_both_endpoints(scenario):
     cfg, grid, risk, plans, conflicts = scenario
     stage1 = [p.copy() for p in plans]
-    stage1[0].etd = 800.0
-    stage1[0].delay = -200.0
-    stage1[0].paper_strategy = 0
-    layout = build_stage2_decision_layout(plans, conflicts, cfg, grid)
+    stage1[0].etd = 990.0
+    stage1[0].delay = -10.0
+    stage1[0].paper_strategies = (0, 1)
+    stage1[0].speed_profile = [11.374] * 5
+    stage1[0].eta_times = compute_eta_times(stage1[0].path, 990, stage1[0].speed_profile, grid.cell_size)
+    conflicts = detect_conflicts(stage1, cfg)
+    layout = build_stage2_decision_layout(stage1, conflicts, cfg, grid, plans)
+    vector = _vector(layout)
+    for block in layout.blocks:
+        vector[block.reroute_enable_genes] = 0
+    species = np.full(len(conflicts), 2)
+    assert stage2_flight_strategies(layout, species) == {0: (2,), 1: (2,)}
+    decoded = decode_stage2_solution(vector, stage1, plans, layout, species, cfg, grid, risk)
+    assert decoded[0].atd == 990 and decoded[0].delay == -10
+    assert decoded[0].speed_profile == stage1[0].speed_profile
+    assert decoded[0].path == stage1[0].path
+    assert flight_strategies(decoded[0]) == (0, 1, 2)
+    assert decoded[1].path == plans[1].path and not decoded[1].changed
+    mixed = np.arange(len(conflicts)) % 3
+    original = mixed.copy()
+    assert stage2_flight_strategies(layout, mixed) == {0: (0, 1, 2), 1: (0, 1, 2)}
+    assert np.array_equal(original, mixed)
+
+
+def test_stage2_can_modify_one_both_or_neither_endpoint(scenario):
+    cfg, grid, risk, plans, conflicts = scenario
+    layout = build_stage2_decision_layout(plans, conflicts, cfg, grid, plans)
+    species = np.zeros(len(conflicts), dtype=int)
+    for selected in ((), (0,), (0, 1)):
+        vector = _vector(layout)
+        for block in layout.blocks:
+            vector[block.atd_gene] = 800 if block.flight_id in selected else 1000
+        decoded = decode_stage2_solution(vector, plans, plans, layout, species, cfg, grid, risk)
+        assert tuple(p.id for p in decoded if p.changed) == selected
+
+
+@pytest.mark.parametrize("strategy", [1, 2])
+@pytest.mark.parametrize("selected", [(), (0,), (0, 1)])
+def test_stage2_speed_and_reroute_allow_endpoint_noop(scenario, strategy, selected):
+    cfg, grid, risk, plans, conflicts = scenario
+    layout = build_stage2_decision_layout(plans, conflicts, cfg, grid, plans)
+    vector = _vector(layout)
+    for block in layout.blocks:
+        vector[block.speed_genes] = 11.374 if block.flight_id in selected else 10
+        vector[block.reroute_enable_genes] = float(block.flight_id in selected)
+        for genes in block.reroute_genes:
+            vector[genes] = [4, 5, 2]
+    final = decode_stage2_solution(vector, plans, plans, layout, np.full(len(conflicts), strategy), cfg, grid, risk)
+    assert tuple(p.id for p in final if p.changed) == selected
+
+
+def test_stage2_layout_uses_rerouted_stage1_geometry(scenario):
+    cfg, grid, risk, plans, conflicts = scenario
+    layout1 = build_stage1_decision_layout(plans, [0, 1], conflicts, cfg, grid)
+    vector = _vector(layout1)
+    for block in layout1.blocks:
+        vector[block.activation_genes] = [0, 1, 1]
+        vector[block.speed_genes] = 11.374
+        for genes in block.reroute_genes:
+            vector[genes] = [4, 5, 2]
+    current = decode_stage1_solution(vector, plans, layout1, cfg, grid, risk)
+    remaining = detect_conflicts(current, cfg)
+    assert any(c.cell not in plans[0].path for c in remaining)
+    layout2 = build_stage2_decision_layout(current, remaining, cfg, grid, plans)
+    noop = _vector(layout2)
+    for block in layout2.blocks:
+        noop[block.reroute_enable_genes] = 0
+        assert max(block.segment_indices) == len(current[block.flight_id].path) - 2
+    final = decode_stage2_solution(noop, current, plans, layout2, np.full(len(remaining), 2), cfg, grid, risk)
+    assert [p.path for p in final] == [p.path for p in current]
+    assert [p.speed_profile for p in final] == [p.speed_profile for p in current]
+    assert all(p.changed for p in final)
+    with pytest.raises(ValueError, match="stage input path"):
+        build_stage2_decision_layout(plans, remaining, cfg, grid, plans)
+
+
+def test_stage2_speed_only_opens_sampled_conflict_segments(scenario):
+    cfg, grid, risk, plans, conflicts = scenario
+    cfg["paper_encoding"]["local_window_segments"] = 1
+    selected = [conflicts[0], conflicts[-1]]
+    layout = build_stage2_decision_layout(plans, selected, cfg, grid, plans)
     vector = _vector(layout)
     for block in layout.blocks:
         vector[block.speed_genes] = 11.374
-    decoded = decode_stage2_solution(vector, stage1, plans, layout, [1, -1], cfg, grid, risk)
-    assert decoded[0].atd == 1000.0 and decoded[0].delay == 0.0
-    assert decoded[0].paper_strategy == 1 and not decoded[0].rerouted
-    assert decoded[1] is stage1[1]
+        vector[block.atd_gene] = 1000
+    final = decode_stage2_solution(vector, plans, plans, layout, [1, 0], cfg, grid, risk)
+    for block in layout.blocks:
+        for index, speed in enumerate(final[block.flight_id].speed_profile):
+            assert speed == (11.374 if index in block.conflict_segments[0] else 10)
+
+
+def test_adm_dominance_keeps_original_sampled_labels(scenario, monkeypatch):
+    from src import adm_matching as adm
+    cfg, grid, risk, plans, conflicts = scenario
+    layout = build_stage2_decision_layout(plans, conflicts, cfg, grid, plans)
+    sampled = np.stack([np.arange(len(conflicts)) % 3, np.full(len(conflicts), 2),
+                        np.full(len(conflicts), 1), np.full(len(conflicts), 0)])
+    untouched = sampled.copy()
+    monkeypatch.setattr(adm, "sample_strategy_species", lambda *args: sampled.copy())
+    seen = []
+    actual_update = adm.update_probability_matrix
+    def tracked(probability, dominant, rate):
+        seen.append(dominant.copy())
+        return actual_update(probability, dominant, rate)
+    monkeypatch.setattr(adm, "update_probability_matrix", tracked)
+    def fake_fata(objective, lower, upper, dim, **kwargs):
+        context = kwargs["generation_context"](1, 4, np.random.default_rng(1))
+        assert np.array_equal(context, sampled)
+        kwargs["on_generation_evaluated"](1, None, np.array([1, 3, 2, 4]), context)
+        vector = (lower + upper) / 2
+        for block in layout.blocks:
+            vector[block.reroute_enable_genes] = 0
+        return fata.PaperFATAResult(vector, 1, [1], [], [], context[0].copy())
+    monkeypatch.setattr(fata, "fata_optimize_paper", fake_fata)
+    reference = PaperReference.from_initial(plans, risk, conflicts)
+    result = adm.adm_fata_optimize(plans, plans, conflicts, layout, cfg, grid, risk, reference)
+    assert np.array_equal(seen[0], sampled[[0]])
+    assert np.array_equal(result.best_strategies, sampled[0])
+    assert np.array_equal(result.final_probability, actual_update(np.full((len(conflicts), 3), 1/3), sampled[[0]], .5))
+    assert np.array_equal(sampled, untouched)
 
 
 def test_strict_path_never_calls_repair_and_stage2_runs_fata(scenario, monkeypatch):
@@ -194,7 +318,7 @@ def test_strict_path_never_calls_repair_and_stage2_runs_fata(scenario, monkeypat
         if len(calls) == 1:
             layout = build_stage1_decision_layout(plans, [0], conflicts, cfg, grid)
             vector = _vector(layout)
-            vector[layout.blocks[0].strategy_gene] = 0.1
+            vector[layout.blocks[0].activation_genes] = [1, 0, 0]
             vector[layout.blocks[0].atd_gene] = plans[0].etd
             score = args[0](vector, kwargs["max_iter"])
             return fata.PaperFATAResult(vector, score, [score], [], [], None)

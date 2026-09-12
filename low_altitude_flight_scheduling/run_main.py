@@ -58,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--outputs", default="outputs")
     parser.add_argument("--scheduler-mode", choices=["paper_strict", "legacy_engineering"], default=None)
     parser.add_argument("--n-jobs", type=int, default=None)
+    parser.add_argument("--paper-objective-scale-mode", choices=["raw_equation", "initial_reference_experimental"], default=None)
     return parser.parse_args()
 
 
@@ -197,6 +198,10 @@ def main() -> None:
         cfg["fata"]["NP"] = opt.get("legacy_NP", cfg["fata"]["NP"])
     if args.n_jobs is not None:
         cfg["optimization"]["n_jobs"] = args.n_jobs
+    if args.paper_objective_scale_mode is not None:
+        if cfg["optimization"]["scheduler_mode"] != "paper_strict":
+            raise ValueError("Paper objective scale applies only to paper_strict")
+        cfg["optimization"]["paper_objective_scale_mode"] = args.paper_objective_scale_mode
     if args.quick:
         cfg = apply_quick_overrides(cfg)
     if args.n_flights is not None:
