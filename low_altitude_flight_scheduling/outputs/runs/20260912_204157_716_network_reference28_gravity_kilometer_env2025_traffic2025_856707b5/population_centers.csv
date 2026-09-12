@@ -1,0 +1,5 @@
+run_id,center_id,grid_x,grid_y,physical_x_m,physical_y_m,building_density,center_population_density
+20260912_204157_716_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,1,14.5,24.5,1500.0,2500.0,0.28,10500.0
+20260912_204157_716_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,2,24.5,24.5,2500.0,2500.0,0.28,10500.0
+20260912_204157_716_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,3,44.5,14.5,4500.0,1500.0,0.24,9499.999999999998
+20260912_204157_716_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,4,34.5,44.5,3500.0,4500.0,0.21,8750.0

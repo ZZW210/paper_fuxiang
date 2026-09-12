@@ -1,0 +1,15 @@
+{
+  "run_id": "20260912_204521_454_network_reference28_gravity_meter_env2025_traffic2025_856707b5",
+  "population_model": "reference28_gravity",
+  "population_map_mode": "static_snapshot",
+  "population_units": "persons/km^2",
+  "risk_density_units": "persons/m^2",
+  "environment_seed": 2025,
+  "traffic_seed": 2025,
+  "requested_centers": 4,
+  "actual_gravity_centers": 4,
+  "diffusion_radius_m": 1000.0,
+  "gaussian_hotspots": 0,
+  "risk_statistics_quantity": "globally min-max normalized existing P_bal+P_par",
+  "ground_plot_definition": "lowest cell-center layer projected onto ground, not an extra layer"
+}

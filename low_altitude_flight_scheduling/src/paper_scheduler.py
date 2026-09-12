@@ -215,9 +215,9 @@ def run_paper_main(cfg, args, root: Path):
     set_random_seed(args.seed)
     # Table 1: strict scheduling uses 30 s, not the legacy calibration's 20 s.
     cfg["conflict"]["t_conflict"] = 30.0
-    grid = AirspaceGrid.from_config(cfg, seed=args.seed)
+    grid = AirspaceGrid.from_config(cfg, seed=cfg.get("environment_seed", args.seed))
     risk_map = generate_risk_map(grid, cfg, out)
-    plans = generate_flight_plans(grid, risk_map, cfg, out, seed=args.seed)
+    plans = generate_flight_plans(grid, risk_map, cfg, out, seed=cfg.get("traffic_seed", args.seed))
     for plan in plans:
         if plan.etd < 1.0:
             shift = 1.0 - plan.etd

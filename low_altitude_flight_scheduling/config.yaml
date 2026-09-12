@@ -1,4 +1,16 @@
 scene_mode: "paper_strict_random"
+environment_seed: 2025
+traffic_seed: 2025
+population_model: "reference28_gravity"
+population_map_mode: "static_snapshot"
+population:
+  window_size: 10
+  min_center_spacing_m: 1000
+  n_population_centers: 4
+  beta: 2.0
+  beta_sensitivity: [1.0, 2.0, 4.0]
+# The paper does not disclose distance units; preserve the existing default.
+astar_distance_scale_mode: "meter"
 
 paper_scene:
   generation_mode: "paper_random"

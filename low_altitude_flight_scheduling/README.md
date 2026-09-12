@@ -98,7 +98,7 @@ normal默认`Parf=.2, NP=50`，两阶段各200代，权重`wc=.8, wd=.25, wr=.5,
 
 ## 公式对应与近似
 
-风险地图保留论文的综合风险结构 `P_total = P_bal + P_par`、撞击影响概率、严重程度概率、弹道下坠和降落伞漂移项。由于论文没有给出完整城市人口场，本项目用基础人口密度、热点和建筑影响生成空间人口密度，并进行 min-max normalization 供 A* 使用。
+风险地图保留论文的综合风险结构 `P_total = P_bal + P_par`、撞击影响概率、严重程度概率，以及既有弹道下坠/降落伞漂移近似。`paper_strict` 人口层使用固定 `3500 persons/km²` 基准与建筑 footprint 提取的中心，再作最近中心 gravity 扩散；随机 Gaussian 人口热点仅属于 `legacy_engineering` 或显式的初始网络实验对照。保留既有 min-max normalization 供 A* 使用，并额外保存未归一化风险用于审计。完整假设见 [implementation_assumptions.md](implementation_assumptions.md)。
 
 冲突探测中，不考虑不确定性使用同一栅格过点时间差 `|t_a - t_b| <= t_conflict`。考虑不确定性时，`t_ETA ~ Normal(mu_t, sigma_t^2)`，默认 `sigma_t = sigma0 + sigma_rate * elapsed_time`，并用正态置信区间扩展安全时间间隔。
 
@@ -152,7 +152,7 @@ OD cell centers are sampled uniformly then rejected if occupied, outside
 the fixed distance band or disconnected. Tolerance is never relaxed to fit
 conflict counts. z=0 is the ground terminal index; airspace cell centers
 remain at (z+0.5)*30m. No new altitude preference is imposed.
-City/population generation, sigma0=1 and sigma_rate=0.01 remain assumptions;
+Synthetic city generation, population-center extraction/strength, sigma0=1 and sigma_rate=0.01 remain assumptions;
 sigma is unchanged. CI radius l=2 is also an implementation assumption.
 
 Only initial scenes and diagnostics are run by these commands:
@@ -164,7 +164,8 @@ python scan_paper_scenes.py --seed-start 2020 --seed-end 2039 --n-jobs 8
 python scan_paper_scenes.py --seed-start 2020 --seed-end 2039 --n-jobs 8 --scene-mode paper_calibrated
 ```
 
-Seed ranges are inclusive. Each scan is isolated in
+Seed ranges are inclusive and now vary traffic only, while the environment
+seed remains fixed (default 2025; override with --environment-seed). Each scan is isolated in
 `outputs/scene_scans/<scan_id>/` using the existing timestamp/mode/seed/commit
 run-id convention. The manifest records the full config and all candidates;
 each seed has its own diagnostics, initial plans, obstacle/risk arrays and
@@ -175,7 +176,7 @@ conflict CSVs. FATA/ADM are never executed by these tools.
 `abs(det-53)/53 + abs(unc-97)/97 + abs(point_coverage-78/97)` and writes
 `scene_calibration_report.md`. Final optimization results are never used.
 The selected candidate's `scene_config.json`, arrays and initial pickle
-record the replayable scene; use its seed explicitly for later scheduling.
+record the replayable scene; use both environment and traffic seeds explicitly for later scheduling.
 It is a calibrated reproduction scene, not the exact original scene.
 
 CI uses the unweighted simple graph and the exact l-hop boundary formula,
@@ -192,3 +193,67 @@ endpoint contributions.
 The one-scene report compares the existing archived engineering paths
 recounted at the same 30s/sigma against paper_random. Its baseline source is
 recorded; absent baseline entries and undisclosed paper metrics stay blank.
+
+## Static gravity population and controlled upstream experiments
+
+Reference [28] is time-dependent, but the target paper
+does not disclose a time-of-day population scenario;
+therefore a static spatial snapshot using its gravity
+diffusion concept is used.
+
+`population_model: reference28_gravity`, `population_map_mode: static_snapshot`.
+No Singapore MRT data, real station coordinates, measured Singapore population
+densities or fake Random Forest is used. The target paper fixes the static
+background to 3500 persons/km²; the risk formula converts it once to
+0.0035 persons/m² before multiplication by an impact area in m².
+
+Building footprints are `obstacles.any(axis=2)`, counted once regardless of
+building height. Non-overlapping 10×10 windows supply density local maxima;
+Euclidean NMS uses 1000m spacing and up to four centers (defaults are assumptions).
+Center coordinates are window centroids; tied maxima use descending density then
+x/y order. Density normalization is window density / maximum window density.
+Strength is `3500*(1+beta*normalized_building_density)`, default beta=2.
+Inside 1km, use only the nearest center's `strength*exp(1-r_km²)`; at/after 1km
+use 3500. No center summation, smoothing, zero population on buildings, or
+time variation during flight is introduced. An empty city retains the static
+background; fewer available maxima are recorded, never fabricated to fit CI.
+
+`environment_seed` controls buildings and population/risk layers;
+`traffic_seed` controls free ground OD and ETD. Both default to 2025 and are
+recorded in manifests. `run_main.py --seed S` remains an alias for both seeds;
+explicit `--environment-seed`/`--traffic-seed` take priority. Optimizer algorithms
+are unchanged; do not use run_main for this upstream-only round.
+
+Run from the project directory:
+
+```bash
+python analyze_risk_route_network.py --environment-seed 2025 --traffic-seed 2025
+```
+
+This executes exactly A-D, each with 100 plans and identical buildings, OD, ETD
+and 10m/s speeds: old_gaussian+meter; gravity+meter; gravity+grid; gravity+kilometer.
+It runs only grid/population/risk/A*/conflict detection/network/CI, not Stage1,
+Stage2, FATA, ADM or the scheduling objective. Failed fixed OD paths abort rather
+than resample tasks. No statistic selects a population center, beta, seed, cost
+scale or "best" group. All A* modes keep 0.8/0.2 weights and scale both distance
+and heuristic; horizontal steps are 100,1,0.1. Default meter is unchanged because
+the paper does not disclose the length unit. Gaussian A preserves the old
+population generator but shares the risk computation/normalization with B-D.
+
+Each group creates `outputs/runs/YYYYMMDD_HHMMSS_mmm_network_<population_mode>_<distance_scale>_env2025_traffic2025_<gitSHA>/`.
+Existing runs cannot be overwritten. All run CSVs have run_id, with shared input
+hashes and actual executed stages in `run_manifest.json`. Population arrays use
+persons/km². Files include population_centers.csv, population_map.npy,
+population_density_map.png, risk_map_raw.npy, risk_map_stats.csv,
+risk_map_ground.png and risk_map_z1..z4.png. z1..z4 map to the four existing
+15/45/75/105m cell-center layers; ground is explicitly the lowest-layer projection,
+not an added fifth layer. Route reuse counts distinct flights per visited 3D cell;
+route density Gini uses distinct flight footprints over all 2D cells including zeros.
+
+Comparison CSV and report live in an isolated `outputs/comparisons/<comparison_id>/`:
+`risk_route_network_comparison.csv` and `risk_route_network_report.md`.
+They display 53,97,78/97 only as references and separate population A→B effects
+from distance-scale B→C→D effects. Attribution is conditional on this city/traffic
+sample, not a claim of exact structural reproduction. For future explicit beta
+sensitivity, manually use `--beta 1`, `--beta 2` or `--beta 4` (never auto-selected).
+This round's validation excludes scheduling end-to-end/FATA/ADM tests.

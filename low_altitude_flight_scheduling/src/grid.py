@@ -47,11 +47,15 @@ class AirspaceGrid:
     @classmethod
     def from_config(cls, cfg: dict, seed: int | None = None) -> "AirspaceGrid":
         air = cfg["airspace"]
+        if seed is None:
+            seed = (cfg.get("environment_seed", cfg["flight"]["random_seed"])
+                    if cfg.get("optimization", {}).get("scheduler_mode") == "paper_strict"
+                    else cfg["flight"]["random_seed"])
         return cls(
             shape=tuple(int(v) for v in air["grid_shape"]),
             cell_size=tuple(int(v) for v in air["grid_cell_size"]),
             obstacle_ratio=float(air["obstacle_ratio"]),
-            seed=int(seed if seed is not None else cfg["flight"]["random_seed"]),
+            seed=int(seed),
         )
 
     def in_bounds(self, p: GridPoint) -> bool:

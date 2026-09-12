@@ -9,6 +9,18 @@ from .utils import deep_update
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "environment_seed": 2025,
+    "traffic_seed": 2025,
+    "population_model": "reference28_gravity",
+    "population_map_mode": "static_snapshot",
+    "population": {
+        "window_size": 10,
+        "min_center_spacing_m": 1000.0,
+        "n_population_centers": 4,
+        "beta": 2.0,
+        "beta_sensitivity": [1.0, 2.0, 4.0],
+    },
+    "astar_distance_scale_mode": "meter",
     "airspace": {
         "physical_size": [6000, 6000, 120],
         "grid_cell_size": [100, 100, 30],
@@ -287,7 +299,18 @@ def load_config(path: str | Path = "config.yaml", overrides: dict[str, Any] | No
     else:
         for section in ("flight_generation", "astar", "conflict"):
             cfg[section] = copy.deepcopy(cfg["legacy_scene"][section])
+        cfg["population_model"] = "old_gaussian"
     return cfg
+
+
+def resolve_scene_seeds(cfg, seed=None, environment_seed=None, traffic_seed=None):
+    """--seed is a backwards-compatible alias; explicit split seeds take priority."""
+    environment = int(environment_seed if environment_seed is not None else
+                      seed if seed is not None else cfg.get("environment_seed", 2025))
+    traffic = int(traffic_seed if traffic_seed is not None else
+                  seed if seed is not None else cfg.get("traffic_seed", 2025))
+    cfg.update(environment_seed=environment, traffic_seed=traffic)
+    return environment, traffic
 
 
 def apply_quick_overrides(cfg: dict[str, Any]) -> dict[str, Any]:

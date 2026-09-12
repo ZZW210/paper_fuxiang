@@ -14,7 +14,7 @@ import pandas as pd
 
 from .conflict_detection import detect_conflicts, group_continuous_conflicts
 from .conflict_network import build_conflict_network, collective_influence
-from .flight_plan import generate_flight_plans
+from .flight_plan import generate_flight_plans, route_density_gini
 from .grid import AirspaceGrid
 from .risk_map import generate_risk_map
 
@@ -37,6 +37,17 @@ def pair_key(c):
     return tuple(sorted((c.plan_a, c.plan_b)))
 
 
+def tag_run_csvs(directory, run_id):
+    """Add provenance at the output boundary, without changing the detector."""
+    for path in Path(directory).glob("*.csv"):
+        frame = pd.read_csv(path)
+        if "run_id" in frame and not frame["run_id"].eq(run_id).all():
+            raise ValueError(f"CSV belongs to another run: {path}")
+        if "run_id" not in frame:
+            frame.insert(0, "run_id", run_id)
+            frame.to_csv(path, index=False)
+
+
 def coverage(conflicts, ids):
     ids = set(ids)
     covered = [c for c in conflicts if c.plan_a in ids or c.plan_b in ids]
@@ -49,7 +60,17 @@ def ci_top10(graph, radius):
     return sorted(graph.nodes, key=lambda pid: (-scores[pid], pid))[:10]
 
 
-def analyze_initial_conflict_network(plans, conflicts, deterministic, seed, run_id, output_dir=None):
+def route_concentration_metrics(plans, grid):
+    """2D Gini includes zero-use cells; 3D reuse quantiles use visited cells only."""
+    reuse = Counter(cell for plan in plans for cell in set(plan.path))
+    values = np.array(list(reuse.values()), dtype=float)
+    return dict(route_density_gini=route_density_gini(plans, grid),
+                route_cell_reuse_p90=float(np.percentile(values, 90)) if len(values) else 0.0,
+                route_cell_reuse_max=int(values.max()) if len(values) else 0,
+                route_visited_3d_cells=len(reuse))
+
+
+def analyze_initial_conflict_network(plans, conflicts, deterministic, seed, run_id, output_dir=None, grid=None):
     graph = build_conflict_network(plans, conflicts)
     degrees = dict(graph.degree())
     degree_values = np.asarray(list(degrees.values()), dtype=float)
@@ -89,21 +110,26 @@ def analyze_initial_conflict_network(plans, conflicts, deterministic, seed, run_
         same_pair_same_cell_multiple_index_count=sum(v - 1 for v in spatial.values()),
         same_pair_same_cell_multiple_index_groups=sum(v > 1 for v in spatial.values()),
     )
+    if grid is not None:
+        row.update(route_concentration_metrics(plans, grid))
     sensitivity = []
     for radius in (1, 2, 3):
         ids = ci_top10(graph, radius)
         pc, ec = coverage(conflicts, ids)
         reduced = graph.copy()
         reduced.remove_nodes_from(ids)
-        sensitivity.append(dict(ci_l=radius, top10_flight_ids=json.dumps(ids), top10_point_coverage=pc,
+        sensitivity.append(dict(run_id=run_id, ci_l=radius, top10_flight_ids=json.dumps(ids), top10_point_coverage=pc,
                                 top10_pair_coverage=ec, remaining_edges_after_top10_removal=reduced.number_of_edges(),
                                 lcc_ratio_after_top10_removal=max((len(c) for c in nx.connected_components(reduced)), default=0) / len(plans) if plans else 0.0))
     if output_dir is not None:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([row]).to_csv(out / "initial_network_diagnostics.csv", index=False)
+        pd.DataFrame([dict(run_id=run_id, plan_a=pair[0], plan_b=pair[1], conflict_points=count)
+                      for pair, count in sorted(counts.items())],
+                     columns=["run_id", "plan_a", "plan_b", "conflict_points"]).to_csv(out / "network_edges.csv", index=False)
         pd.DataFrame(sensitivity).to_csv(out / "ci_radius_sensitivity.csv", index=False)
-        pd.DataFrame([dict(flight_id=pid, degree=degrees[pid], collective_influence=collective_influence(graph, 2)[pid],
+        pd.DataFrame([dict(run_id=run_id, flight_id=pid, degree=degrees[pid], collective_influence=collective_influence(graph, 2)[pid],
                            conflict_point_involvement=contribution[pid], is_ci_top10=pid in key_ids) for pid in sorted(graph.nodes)]).to_csv(out / "initial_node_diagnostics.csv", index=False)
     return row, sensitivity
 
@@ -129,20 +155,24 @@ def write_calibration_report(directory, rows, seed_start, seed_end):
     return best
 
 
-def generate_and_analyze_scene(cfg, seed, run_id, output_dir=None):
+def generate_and_analyze_scene(cfg, seed, run_id, output_dir=None, environment_seed=None):
     start = time.perf_counter()
     cfg = copy.deepcopy(cfg)
     cfg["flight"]["random_seed"] = seed
-    grid = AirspaceGrid.from_config(cfg, seed=seed)
-    risk = generate_risk_map(grid, cfg)
+    environment_seed = int(environment_seed if environment_seed is not None else cfg.get("environment_seed", 2025))
+    cfg.update(environment_seed=environment_seed, traffic_seed=seed)
+    cfg["run"] = dict(run_id=run_id)
+    grid = AirspaceGrid.from_config(cfg, seed=environment_seed)
+    risk = generate_risk_map(grid, cfg, output_dir)
     plans = generate_flight_plans(grid, risk, cfg, seed=seed)
     uncertain = detect_conflicts(plans, cfg, uncertain=True)
     deterministic = detect_conflicts(plans, cfg, uncertain=False)
-    row, sensitivity = analyze_initial_conflict_network(plans, uncertain, deterministic, seed, run_id, output_dir)
+    row, sensitivity = analyze_initial_conflict_network(plans, uncertain, deterministic, seed, run_id, output_dir, grid)
     row.update(runtime=time.perf_counter() - start, deterministic_Nc=len(deterministic), uncertain_Nc=len(uncertain),
                edges=row["network_edges"], CI_top10_point_coverage=row["top10_ci_point_coverage"],
                CI_top10_pair_coverage=row["top10_ci_pair_coverage"], continuous_ratio=row["continuous_conflict_point_ratio"],
-               scene_mode=cfg.get("scene_mode", "paper_strict_random"))
+               scene_mode=cfg.get("scene_mode", "paper_strict_random"), environment_seed=environment_seed,
+               traffic_seed=seed)
     row["calibration_score"] = calibration_score(row)
     if output_dir is not None:
         out = Path(output_dir)
@@ -155,4 +185,10 @@ def generate_and_analyze_scene(cfg, seed, run_id, output_dir=None):
         with (out / "initial_plans.pkl").open("wb") as fh:
             pickle.dump(plans, fh)
         (out / "scene_config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        (out / "run_manifest.json").write_text(json.dumps(dict(
+            run_id=run_id, environment_seed=environment_seed, traffic_seed=seed,
+            population_model=cfg.get("population_model"), distance_scale=cfg.get("astar_distance_scale_mode"),
+            status="completed", optimizers_executed=False, config=cfg,
+        ), indent=2), encoding="utf-8")
+        tag_run_csvs(out, run_id)
     return row, sensitivity

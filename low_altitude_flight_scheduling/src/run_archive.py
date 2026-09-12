@@ -71,6 +71,14 @@ def generate_run_id(mode, objective_mode, seed, commit="unknown"):
     return f"{timestamp}_{mode}_{objective_mode}_seed{seed}_{commit[:8]}"
 
 
+def generate_network_run_id(population_mode, distance_scale, environment_seed, traffic_seed, commit="unknown"):
+    timestamp = generate_run_id("network", "snapshot", traffic_seed, commit).split("_network_", 1)[0]
+    value = (f"{timestamp}_network_{population_mode}_{distance_scale}_env{environment_seed}"
+             f"_traffic{traffic_seed}_{commit[:8]}")
+    validate_run_id(value)
+    return value
+
+
 def validate_run_id(run_id):
     if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,139}", run_id)
             or run_id.endswith(".") or run_id.split('.')[0].upper() in
@@ -138,7 +146,9 @@ class RunArchive:
         self.start = time.perf_counter()
         self.manifest = dict(run_id=self.run_id, start_time=datetime.now().astimezone().isoformat(),
                              end_time=None, status="running", git_commit=commit, git_dirty=dirty,
-                             seed=args.seed, scheduler_mode=mode, objective_scale_mode=objective, quick=args.quick,
+                             seed=args.seed, environment_seed=cfg.get("environment_seed", args.seed),
+                             traffic_seed=cfg.get("traffic_seed", args.seed),
+                             scheduler_mode=mode, objective_scale_mode=objective, quick=args.quick,
                              NP_stage1=cfg["fata"]["NP"], NP_stage2=cfg["fata"]["NP"],
                              Ngen_stage1=cfg["fata"]["Ngen_max_stage1"], Ngen_stage2=cfg["fata"]["Ngen_max_stage2"],
                              n_jobs=cfg["optimization"]["n_jobs"], python_version=sys.version,
@@ -234,6 +244,12 @@ class RunArchive:
         pd.DataFrame(rows).to_csv(profile_path, index=False)
         self._write_snapshot()
         summary = pd.read_csv(summary_path)
+        population_assumptions = self.directory / "population_implementation_assumptions.md"
+        if population_assumptions.exists():
+            path = self.directory / "implementation_assumptions.md"
+            text = path.read_text(encoding="utf-8") if path.exists() else "# Implementation assumptions\n"
+            if "## Population and risk implementation assumptions" not in text:
+                path.write_text(text + "\n" + population_assumptions.read_text(encoding="utf-8"), encoding="utf-8")
         elapsed = time.perf_counter() - self.start
         summary["runtime_total"] = summary["runtime_seconds"] = summary["total_runtime"] = elapsed
         summary.to_csv(summary_path, index=False)

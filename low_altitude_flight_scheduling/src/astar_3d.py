@@ -9,6 +9,14 @@ from .grid import AirspaceGrid, GridPoint
 from .utils import euclidean
 
 
+def astar_distance_unit_m(mode: str, horizontal_cell_size_m: float = 100.0) -> float:
+    """Divisor applied consistently to step length and heuristic, not risk."""
+    units = {"meter": 1.0, "grid": float(horizontal_cell_size_m), "kilometer": 1000.0}
+    if mode not in units:
+        raise ValueError(f"Unknown astar_distance_scale_mode: {mode}")
+    return units[mode]
+
+
 def astar_path(
     grid: AirspaceGrid,
     start: GridPoint,

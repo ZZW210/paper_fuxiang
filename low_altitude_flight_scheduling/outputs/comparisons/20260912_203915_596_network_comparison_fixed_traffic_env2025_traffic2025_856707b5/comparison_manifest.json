@@ -1,0 +1,40 @@
+{
+  "comparison_id": "20260912_203915_596_network_comparison_fixed_traffic_env2025_traffic2025_856707b5",
+  "environment_seed": 2025,
+  "traffic_seed": 2025,
+  "git_commit": "856707b5ddaf733226df5631f0b0b6dfe9601b6d",
+  "git_dirty": true,
+  "n_flights": 100,
+  "status": "completed",
+  "variants": [
+    [
+      "old_gaussian",
+      "meter"
+    ],
+    [
+      "reference28_gravity",
+      "meter"
+    ],
+    [
+      "reference28_gravity",
+      "grid"
+    ],
+    [
+      "reference28_gravity",
+      "kilometer"
+    ]
+  ],
+  "completed_runs": [
+    "20260912_203915_622_network_old_gaussian_meter_env2025_traffic2025_856707b5",
+    "20260912_203917_936_network_reference28_gravity_meter_env2025_traffic2025_856707b5",
+    "20260912_203920_309_network_reference28_gravity_grid_env2025_traffic2025_856707b5",
+    "20260912_203922_596_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5"
+  ],
+  "optimizers_executed": false,
+  "paper_references": {
+    "det_Nc": 53,
+    "unc_Nc": 97,
+    "ci_top10_coverage": 0.8041237113402062
+  },
+  "end_time": "2026-09-12T20:39:25.915034+08:00"
+}

@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--seed-start", type=int, default=2020)
     parser.add_argument("--seed-end", type=int, default=2039, help="Inclusive final seed")
     parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--environment-seed", type=int, default=None)
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--outputs", default="outputs/scene_scans")
     parser.add_argument("--scan-id")
@@ -35,6 +36,8 @@ def main():
     root = Path(__file__).resolve().parent
     cfg = load_config(root / args.config, {"optimization": {"scheduler_mode": "paper_strict"}})
     cfg["scene_mode"] = args.scene_mode
+    if args.environment_seed is not None:
+        cfg["environment_seed"] = args.environment_seed
     commit, dirty = git_metadata(root.parent)
     scan_id = args.scan_id or generate_run_id(args.scene_mode, "initial_network", args.seed_start, commit)
     validate_run_id(scan_id)
@@ -42,6 +45,8 @@ def main():
     directory.mkdir(parents=True, exist_ok=False)
     seeds = list(range(args.seed_start, args.seed_end + 1))
     manifest = dict(scan_id=scan_id, scene_mode=args.scene_mode, seed_start=args.seed_start, seed_end=args.seed_end,
+                    environment_seed=cfg["environment_seed"], traffic_seed_start=args.seed_start,
+                    traffic_seed_end=args.seed_end, seed_scope="traffic_only",
                     seed_end_inclusive=True, candidate_count=len(seeds), n_jobs=args.n_jobs,
                     git_commit=commit, git_dirty=dirty, config=cfg, status="running",
                     optimizers_executed=False, start_time=datetime.now().astimezone().isoformat())

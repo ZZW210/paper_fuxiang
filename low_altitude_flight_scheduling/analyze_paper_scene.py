@@ -8,27 +8,31 @@ import pickle
 
 import pandas as pd
 
-from src.config import load_config
+from src.config import load_config, resolve_scene_seeds
 from src.conflict_detection import detect_conflicts
-from src.run_archive import generate_run_id, git_metadata
-from src.scene_diagnostics import analyze_initial_conflict_network, generate_and_analyze_scene
+from src.run_archive import generate_network_run_id, git_metadata
+from src.scene_diagnostics import analyze_initial_conflict_network, generate_and_analyze_scene, tag_run_csvs
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--seed", type=int, default=2025)
+    parser.add_argument("--seed", type=int, default=None, help="Compatibility alias for both seeds")
+    parser.add_argument("--environment-seed", type=int, default=None)
+    parser.add_argument("--traffic-seed", type=int, default=None)
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--outputs", default="outputs/initial_network_runs")
+    parser.add_argument("--outputs", default="outputs/runs")
     parser.add_argument("--baseline-plans", default="outputs/initial_plans.pkl")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     cfg = load_config(root / args.config, {"optimization": {"scheduler_mode": "paper_strict"}})
     cfg["scene_mode"] = "paper_strict_random"
+    environment_seed, traffic_seed = resolve_scene_seeds(cfg, args.seed, args.environment_seed, args.traffic_seed)
+    args.seed = traffic_seed
     commit, dirty = git_metadata(root.parent)
-    run_id = generate_run_id("paper_strict_random", "initial_network", args.seed, commit)
+    run_id = generate_network_run_id(cfg["population_model"], cfg["astar_distance_scale_mode"], environment_seed, traffic_seed, commit)
     out = root / args.outputs / run_id
     out.mkdir(parents=True, exist_ok=False)
-    row, sensitivity = generate_and_analyze_scene(cfg, args.seed, run_id, out)
+    row, sensitivity = generate_and_analyze_scene(cfg, args.seed, run_id, out, environment_seed)
     baseline_path = root / args.baseline_plans
     baseline = None
     if baseline_path.exists():
@@ -61,7 +65,8 @@ def main():
         print(f"CI l={item['ci_l']} Top10 coverage: {item['top10_point_coverage']:.6f}")
     print("Paper references: deterministic=53; uncertain=97; CI Top10 coverage=78/97=0.8041")
     (out / "scene_manifest.json").write_text(json.dumps(dict(
-        run_id=run_id, seed=args.seed, scene_mode="paper_strict_random", git_commit=commit,
+        run_id=run_id, seed=args.seed, environment_seed=environment_seed, traffic_seed=traffic_seed,
+        scene_mode="paper_strict_random", git_commit=commit,
         git_dirty=dirty, optimizers_executed=False, config=cfg,
         baseline_path=str(baseline_path) if baseline else None,
         baseline_note="Existing engineering paths recounted with the same 30s and unchanged sigma as paper_random; no baseline regeneration.",
@@ -75,7 +80,7 @@ Run: {run_id}; seed: {args.seed}; scene: paper_strict_random. No FATA, ADM, Stag
 
 1. The heterogeneous scene used OD hotspots and mixed OD patterns, peaked takeoff times, variable speeds, forced cruise altitude and optional corridors. These introduce structure absent from the published random initial-scene description. {baseline_text}
 
-2. paper_random restores random ground OD sampling, 100 plans, distance near 6km, uniform ETD in [0,1800] seconds, constant 10m/s, A* risk/distance weights 0.8/0.2 and t_conflict=30s, alpha=0.05. No forced corridors, waypoints, altitude preference, ground penalty or route bias is used. The A* heuristic and path distance use meters; the engineering distance division by 100 is disabled only at this initial generation call. The 1200m tolerance is an implementation assumption. Random OD positions are discrete ground cell centers, conditioned on feasibility and the fixed distance band; this discretization is an implementation assumption. Random city/population maps and sigma0={cfg['conflict']['sigma0']}, sigma_rate={cfg['conflict']['sigma_rate']} remain implementation assumptions, unchanged in this round.
+2. paper_random restores random ground OD sampling, 100 plans, distance near 6km, uniform ETD in [0,1800] seconds, constant 10m/s, A* risk/distance weights 0.8/0.2 and t_conflict=30s, alpha=0.05. No forced corridors, waypoints, altitude preference, ground penalty or route bias is used. The default A* distance unit remains meter; the paper does not disclose L units. Current population model={cfg['population_model']}; static snapshot with 3500 persons/km² baseline and nearest building-derived-center gravity diffusion. Environment seed={environment_seed}, traffic seed={traffic_seed}; OD and ETD are sampled before A* and are not resampled when a fixed path fails. Window/center/beta and risk normalization assumptions are recorded in implementation_assumptions.md. The 1200m tolerance and OD cell-center discretization are assumptions. sigma0={cfg['conflict']['sigma0']}, sigma_rate={cfg['conflict']['sigma_rate']} are unchanged.
 
 3. CI uses a binary simple graph with one node per plan and one edge per potentially conflicting pair. CI=(k_u-1)*sum(k_v-1) on the exact l-hop boundary. Edge count metadata does not enter CI. Top10 uses ordinary CI with flight-id tie breaking. This follows the published formula; weighted/adaptive key selection is not used for this scene.
 
@@ -94,8 +99,7 @@ Run: {run_id}; seed: {args.seed}; scene: paper_strict_random. No FATA, ADM, Stag
 8. Calibration is optional when a scene resembling published initial statistics is needed, and must be labelled calibrated reproduction scene. A small scan can reveal variability, but does not establish that the paper scene can be recovered. The unbiased seed={args.seed} scene remains the strict result. Calibration must never use final optimization results and must not change CI, key count, tolerance or sigma to fit the targets.
 """
     (out / "initial_network_reproduction_report.md").write_text(report, encoding="utf-8")
-    for name in ("initial_network_reproduction_report.md", "network_reproduction_comparison.csv"):
-        (root / "outputs" / name).write_bytes((out / name).read_bytes())
+    tag_run_csvs(out, run_id)
     print(f"outputs: {out}")
 
 

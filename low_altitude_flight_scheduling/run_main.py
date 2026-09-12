@@ -12,7 +12,7 @@ for _thread_variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THR
 import numpy as np
 import pandas as pd
 
-from src.config import apply_quick_overrides, load_config
+from src.config import apply_quick_overrides, load_config, resolve_scene_seeds
 from src.conflict_detection import (
     count_conflict_edges,
     count_conflict_pairs,
@@ -56,7 +56,9 @@ from src.visualization import plot_fata_convergence, write_all_route_visuals, wr
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the low-altitude scheduling reproduction.")
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--seed", type=int, default=2025)
+    parser.add_argument("--seed", type=int, default=None, help="Compatibility alias for both scene seeds")
+    parser.add_argument("--environment-seed", type=int, default=None)
+    parser.add_argument("--traffic-seed", type=int, default=None)
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--n-flights", type=int, default=None)
     parser.add_argument("--outputs", default="outputs")
@@ -213,6 +215,8 @@ def main() -> None:
     if args.n_flights is not None:
         cfg["flight"]["n_flights"] = int(args.n_flights)
         cfg.setdefault("flight_generation", {})["n_flights"] = int(args.n_flights)
+    _, traffic_seed = resolve_scene_seeds(cfg, args.seed, args.environment_seed, args.traffic_seed)
+    args.seed = int(args.seed if args.seed is not None else traffic_seed)
     cfg["flight"]["random_seed"] = int(args.seed)
     if not 1 <= cfg["optimization"]["n_jobs"] <= 8:
         raise ValueError("n_jobs must be between 1 and 8")
@@ -247,9 +251,9 @@ def _dispatch(cfg, args, root):
     deadline = start_time + max_runtime
     trace: list[dict[str, object]] = []
 
-    grid = AirspaceGrid.from_config(cfg, seed=args.seed)
+    grid = AirspaceGrid.from_config(cfg, seed=cfg["environment_seed"])
     risk = generate_risk_map(grid, cfg, out)
-    plans = generate_flight_plans(grid, risk, cfg, out, seed=args.seed)
+    plans = generate_flight_plans(grid, risk, cfg, out, seed=cfg["traffic_seed"])
 
     conflicts_no = detect_conflicts(plans, cfg, uncertain=False, output_csv=out / "conflicts_no_uncertain.csv")
     conflicts0 = detect_conflicts(plans, cfg, uncertain=True, output_csv=out / "conflicts_uncertain.csv")

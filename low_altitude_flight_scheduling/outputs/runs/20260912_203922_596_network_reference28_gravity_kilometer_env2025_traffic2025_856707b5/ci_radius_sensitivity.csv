@@ -1,0 +1,4 @@
+run_id,ci_l,top10_flight_ids,top10_point_coverage,top10_pair_coverage,remaining_edges_after_top10_removal,lcc_ratio_after_top10_removal
+20260912_203922_596_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,1,"[63, 14, 45, 2, 50, 56, 31, 86, 94, 11]",0.33238636363636365,0.3333333333333333,106,0.86
+20260912_203922_596_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,2,"[14, 45, 31, 63, 50, 52, 82, 86, 84, 18]",0.3380681818181818,0.3522012578616352,103,0.85
+20260912_203922_596_network_reference28_gravity_kilometer_env2025_traffic2025_856707b5,3,"[14, 2, 63, 45, 18, 31, 50, 56, 22, 81]",0.3380681818181818,0.3710691823899371,100,0.85
