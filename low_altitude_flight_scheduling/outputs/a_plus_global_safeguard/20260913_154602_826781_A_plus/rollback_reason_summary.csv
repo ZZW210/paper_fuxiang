@@ -1,0 +1,11 @@
+optimizer_seed,rollback_due_to_pair_increase,rollback_due_to_point_increase,rollback_due_to_fitness_worse,rollback_due_to_infeasible_route,new_pair_trials_rejected,rejected_lower_risk_equal_conflicts
+0,5197,86,22,4082,5305,9
+1,1113,29,1,8491,1143,0
+2,2926,41,4,6641,2971,3
+3,4241,55,3,5222,4299,2
+4,2465,52,6,7005,2523,3
+5,4877,41,5,4641,4921,1
+6,2300,52,2,7284,2354,0
+7,3975,54,6,5503,4035,3
+8,3350,61,8,6093,3418,2
+9,6507,94,14,2808,6613,5

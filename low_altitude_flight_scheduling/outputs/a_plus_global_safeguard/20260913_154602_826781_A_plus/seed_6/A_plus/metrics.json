@@ -1,0 +1,23 @@
+{
+  "optimizer_seed": 6,
+  "method": "A_plus_global_safeguard",
+  "stage1_input_hash": "3951c23ef1f76387b638fc06ba95eefb83ae3ed28e5b8f5ebfdcfb9e4b93502f",
+  "stage1_conflicts": 51,
+  "final_conflicts": 19,
+  "final_conflict_pairs": 18,
+  "zero_conflict": false,
+  "conflict_reduction_ratio": 0.6274509803921569,
+  "exact_survivors": 13,
+  "moved_same_pair": 1,
+  "new_conflict_pairs": 5,
+  "new_conflict_points": 5,
+  "resolved_original_conflicts": 38,
+  "changed_flights": 49,
+  "delayed_flights": 16,
+  "risk_increase_percent": 0.9851623870896382,
+  "final_fitness": 809986.8688316633,
+  "runtime_sec": 38.21207719999802,
+  "rollback_count": 9638,
+  "accepted_trial_count": 312,
+  "acceptance_rate": 0.03135678391959799
+}

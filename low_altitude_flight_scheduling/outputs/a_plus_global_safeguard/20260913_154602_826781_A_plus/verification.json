@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "paired_seeds": 10,
+  "stage1_runs": 0,
+  "shared_input_hashes_verified": 10,
+  "final_global_detections_verified": 20,
+  "unchanged_paper_fitness_values_verified": 20,
+  "origin_partitions_verified": 20,
+  "position_context_round_trips_verified": 20,
+  "accepted_masks_adm_eligibility_and_rejection_partitions_verified": 10,
+  "previous_A_metrics_reproduced_for_seeds": [0, 1, 2],
+  "implementation_hash_matches_manifest": true,
+  "full_test_suite_passed": 120,
+  "baseline_or_previous_experiments_modified": false
+}
