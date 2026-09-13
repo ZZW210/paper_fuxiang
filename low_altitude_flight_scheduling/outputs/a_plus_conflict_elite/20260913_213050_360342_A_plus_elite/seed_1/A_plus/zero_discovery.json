@@ -1,0 +1,10 @@
+{
+  "run_id": "20260913_213050_360342_A_plus_elite",
+  "optimizer_seed": 1,
+  "ever_zero_conflict": false,
+  "first_zero_generation": null,
+  "first_zero_fitness": null,
+  "first_zero_risk": null,
+  "first_zero_changed_flights": null,
+  "first_zero_delayed_flights": null
+}

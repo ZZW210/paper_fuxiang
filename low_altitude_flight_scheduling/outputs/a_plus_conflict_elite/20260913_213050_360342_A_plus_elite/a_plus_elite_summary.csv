@@ -1,0 +1,4 @@
+run_id,method,n_runs,final_conflicts_mean,final_conflicts_std,final_conflicts_median,zero_conflict_success_rate,ever_zero_conflict_rate,first_zero_generation_mean,new_conflict_pairs_mean,exact_survivors_mean,risk_increase_mean,risk_increase_std,changed_flights_mean,delayed_flights_mean,fitness_mean,runtime_mean,elite_reinjection_mean
+20260913_213050_360342_A_plus_elite,A_current_stage2,10,11.2,3.457680661303984,10.0,0.0,0.0,,3.1,7.6,0.41174252040573806,0.4964297413923378,46.5,21.5,478060.8847189758,35.959889239999754,0.0
+20260913_213050_360342_A_plus_elite,A_plus_conflict_elite,10,10.6,3.565264521898917,10.5,0.0,0.0,,1.9,8.2,0.42095624620666056,0.8841519364016845,47.4,22.3,453225.73508773965,36.31387051999845,183.9
+20260913_213050_360342_A_plus_elite,A_plus_paper_incumbent,10,10.6,3.565264521898917,10.5,0.0,0.0,,1.9,8.2,0.42095624620666056,0.8841519364016845,47.4,22.3,453225.73508773965,36.31387051999845,183.9
