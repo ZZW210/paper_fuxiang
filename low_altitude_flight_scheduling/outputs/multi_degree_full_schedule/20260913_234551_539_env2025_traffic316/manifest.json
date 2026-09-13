@@ -1,0 +1,24 @@
+{
+  "environment_seed": 2025,
+  "traffic_seed": 316,
+  "initial_deterministic_conflicts": 53,
+  "initial_uncertain_conflicts": 107,
+  "top_k": 10,
+  "ci_l": 2,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "methods": [
+    "binary",
+    "multi"
+  ],
+  "scene_hash": "47becf38144f23856f09c6cb24c4d8291bb6d1fc6bead0da017273d59073c4c2",
+  "plan_hash": "9507f09b9133bbc0d868435063b6f18537ccdc0de0d707267b6c1cc0402a8b75",
+  "initial_conflict_hash": "3468f8fe19377bed76ff0e4c2aceaf69db8d4170de2621df9cd7fff24d41b997",
+  "stages_executed": [
+    "Stage1",
+    "Stage2"
+  ]
+}

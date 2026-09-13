@@ -1,0 +1,14 @@
+{
+  "stage2_input_conflict_points": 56,
+  "stage2_input_conflict_pairs": 50,
+  "final_conflicts": 12,
+  "final_pairs": 12,
+  "stage2_reduction_ratio": 0.7857142857142857,
+  "final_new_conflict_points": 3,
+  "final_new_conflict_pairs": 3,
+  "final_exact_survivors": 9,
+  "final_moved_same_pair": 0,
+  "final_fitness": 510121.2647611228,
+  "stage2_runtime_sec": 34.801017400001,
+  "stage2_dimension": 1096
+}

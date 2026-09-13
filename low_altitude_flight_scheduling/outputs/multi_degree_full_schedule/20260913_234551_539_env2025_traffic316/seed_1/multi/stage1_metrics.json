@@ -1,0 +1,15 @@
+{
+  "stage1_conflicts": 55,
+  "stage1_pairs": 49,
+  "stage1_reduction_ratio": 0.485981308411215,
+  "stage1_new_conflict_points": 0,
+  "stage1_new_conflict_pairs": 0,
+  "stage1_exact_survivors": 55,
+  "stage1_moved_same_pair": 0,
+  "stage1_changed_flights": 10,
+  "stage1_delayed_flights": 7,
+  "stage1_risk_increase_percent": 0.0,
+  "stage1_fitness": 2329016.9398655565,
+  "stage1_runtime_sec": 18.483656899996276,
+  "stage1_dimension": 564
+}
