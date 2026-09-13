@@ -1,0 +1,23 @@
+{
+  "test_id": "20260913_113232_490610_stage2_ab",
+  "optimizer_seed": 0,
+  "method": "B_legacy_targeted_stage2",
+  "shared_stage1_hash": "128fb3f0b225e594208406ef930782a474fb3ee7d818bd5d4d94501878150f3f",
+  "initial_conflicts": 107,
+  "stage1_conflicts": 51,
+  "final_conflicts": 0,
+  "final_conflict_pairs": 0,
+  "conflict_reduction_ratio": 1.0,
+  "resolved_conflicts": 51,
+  "changed_flights": 44,
+  "delayed_flights": 7,
+  "runtime_sec": 1.9280610000000706,
+  "final_fitness": 4267.031068539412,
+  "risk_increase_percent": 4.598304826204765,
+  "new_conflict_pairs_created": 0,
+  "exact_survivors": 0,
+  "moved_same_pair": 0,
+  "new_conflict_pairs": 0,
+  "new_conflict_points": 0,
+  "resolved_original_conflicts": 51
+}

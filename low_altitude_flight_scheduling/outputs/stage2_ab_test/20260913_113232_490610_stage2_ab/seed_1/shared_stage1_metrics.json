@@ -1,0 +1,12 @@
+{
+  "optimizer_seed": 1,
+  "input_hash": "c85e8142625bf7cfd08f4e36a4826147f7f0a1bb0e6718e23e8d4f56241384e2",
+  "runtime_sec": 19.937674700000116,
+  "fitness": 2283749.180659095,
+  "Tdelay": 3029.6225982616265,
+  "Tair": 58646.84316729757,
+  "ORISK": 760.9502628678582,
+  "Nc": 54,
+  "n_delay": 4,
+  "n_battery": 0
+}

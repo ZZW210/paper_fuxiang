@@ -1,0 +1,3 @@
+method,final_conflicts_mean,final_conflicts_std,zero_conflict_success_rate,runtime_mean,changed_flights_mean,delayed_flights_mean
+A_current_stage2,13.0,6.244997998398398,0.0,35.533349433333264,45.666666666666664,22.333333333333332
+B_legacy_targeted_stage2,0.0,0.0,1.0,1.5913791666667596,44.0,5.666666666666667
