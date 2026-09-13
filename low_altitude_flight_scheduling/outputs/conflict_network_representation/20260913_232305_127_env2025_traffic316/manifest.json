@@ -1,0 +1,18 @@
+{
+  "environment_seed": 2025,
+  "traffic_seed": 316,
+  "initial_deterministic_conflicts": 53,
+  "initial_uncertain_conflicts": 107,
+  "stages_executed": [],
+  "representations": [
+    "binary",
+    "multi",
+    "weighted"
+  ],
+  "l_values": [
+    1,
+    2,
+    3,
+    4
+  ]
+}

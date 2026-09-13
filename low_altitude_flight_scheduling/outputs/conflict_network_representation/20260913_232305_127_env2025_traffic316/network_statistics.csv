@@ -1,0 +1,4 @@
+network_type,node_count,unique_pair_count,edge_count,multi_edge_count,weighted_edge_sum,mean_binary_degree,max_binary_degree,mean_multi_degree,max_multi_degree,mean_strength,max_strength,degree_gini,multi_degree_gini,strength_gini
+binary,100,72,72,107,107.0,1.44,5,2.14,28,2.14,28,0.40708333333333324,0.5466355140186916,0.5466355140186916
+multi,100,72,72,107,107.0,1.44,5,2.14,28,2.14,28,0.40708333333333324,0.5466355140186916,0.5466355140186916
+weighted,100,72,72,107,107.0,1.44,5,2.14,28,2.14,28,0.40708333333333324,0.5466355140186916,0.5466355140186916
