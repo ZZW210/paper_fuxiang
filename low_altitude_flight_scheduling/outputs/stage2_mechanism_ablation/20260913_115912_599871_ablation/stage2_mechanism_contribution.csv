@@ -1,0 +1,4 @@
+mechanism,removed_variant,zero_conflict_rate_drop,mean_final_conflict_increase,mean_new_pair_increase,mean_exact_survivor_increase,rank
+global_rollback,B3_no_global_rollback,1.0,21.2,2.5,18.4,1
+segment_grouping,B1_no_segment_grouping,0.0,0.0,0.0,0.0,2
+conflict_informed_candidates,B2_no_conflict_informed_candidates,0.0,0.0,0.0,0.0,2

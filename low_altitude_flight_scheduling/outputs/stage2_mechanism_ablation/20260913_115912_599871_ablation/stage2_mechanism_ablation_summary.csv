@@ -1,0 +1,5 @@
+variant,n_runs,final_conflicts_mean,final_conflicts_std,final_conflicts_median,zero_conflict_success_rate,new_conflict_pairs_mean,exact_survivors_mean,runtime_mean,risk_increase_mean,changed_flights_mean,delayed_flights_mean
+B0_full,10,0.0,0.0,0.0,1.0,0.0,0.0,1.6288332599999649,10.826095578956137,44.1,5.2
+B1_no_segment_grouping,10,0.0,0.0,0.0,1.0,0.0,0.0,1.519540040000038,13.535519829376423,45.2,5.1
+B2_no_conflict_informed_candidates,10,0.0,0.0,0.0,1.0,0.0,0.0,1.8427952300000014,11.265893448129386,45.2,5.2
+B3_no_global_rollback,10,21.2,8.05260482356141,21.0,0.0,2.5,18.4,1.4214943800001039,9.133740328156296,32.3,5.2

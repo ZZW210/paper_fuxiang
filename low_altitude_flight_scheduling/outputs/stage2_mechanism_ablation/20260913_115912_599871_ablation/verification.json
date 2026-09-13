@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "paired_seeds": 10,
+  "variants_per_seed": 4,
+  "final_global_detections_verified": 40,
+  "origin_partitions_verified": 40,
+  "shared_input_hashes_verified": 10,
+  "action_traces_and_detection_counters_verified": 40,
+  "previous_B0_action_sequences_verified": [0, 1, 2],
+  "reused_stage1_seeds": [0, 1, 2],
+  "extended_stage1_runs": 7,
+  "related_tests_passed": 50,
+  "formal_solver_source_files_modified": false
+}
