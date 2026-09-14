@@ -1,6 +1,7 @@
 """One strict two-stage schedule using MultiGraph degree CI on frozen baseline plans."""
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import time
@@ -73,16 +74,21 @@ def build_multiline_network(plans, conflicts):
     return topology, multi
 
 
-def multi_ci_l2(topology: nx.Graph, multi: nx.MultiGraph) -> dict[int, float]:
+def multi_ci(topology: nx.Graph, multi: nx.MultiGraph, ci_l: int) -> dict[int, float]:
     multi_degree = dict(multi.degree())
     scores = {}
     for flight_id in topology.nodes:
         shell = [
-            other for other, distance in nx.single_source_shortest_path_length(topology, flight_id, cutoff=CI_L).items()
-            if distance == CI_L
+            other for other, distance in nx.single_source_shortest_path_length(topology, flight_id, cutoff=ci_l).items()
+            if distance == ci_l
         ]
         scores[flight_id] = float((multi_degree[flight_id] - 1) * sum(max(0, multi_degree[other] - 1) for other in shell))
     return scores
+
+
+def multi_ci_l2(topology: nx.Graph, multi: nx.MultiGraph) -> dict[int, float]:
+    """Compatibility helper retained for the l=2 formula test."""
+    return multi_ci(topology, multi, 2)
 
 
 def multi_metrics(plans, conflicts):
@@ -92,12 +98,13 @@ def multi_metrics(plans, conflicts):
     involvement = Counter(fid for conflict in conflicts for fid in (int(conflict.plan_a), int(conflict.plan_b)))
     if any(degree[plan.id] != involvement[plan.id] for plan in plans):
         raise AssertionError("MultiGraph degree must equal incident conflict-record count")
-    ci = multi_ci_l2(topology, multi)
+    ci = multi_ci(topology, multi, CI_L)
+    ci_column = f"CI_multi_l{CI_L}"
     ranked_ids = sorted(topology.nodes, key=lambda fid: (-ci[fid], fid))
     rank = {fid: index + 1 for index, fid in enumerate(ranked_ids)}
     rows = [
         dict(flight_id=plan.id, multi_degree=int(degree[plan.id]), unique_conflict_partners=int(unique[plan.id]),
-             conflict_point_involvement=int(involvement[plan.id]), CI_multi_l2=ci[plan.id], multi_rank=rank[plan.id])
+             conflict_point_involvement=int(involvement[plan.id]), **{ci_column: ci[plan.id]}, multi_rank=rank[plan.id])
         for plan in plans
     ]
     return pd.DataFrame(rows).sort_values("multi_rank").reset_index(drop=True), topology, multi
@@ -168,7 +175,8 @@ def _dense_rows(initial, stage1, final, initial_conflicts, stage1_conflicts, fin
         row = rank_map.loc[flight_id]
         rows.append(dict(
             flight_id=flight_id, is_multi_top10=flight_id in keys, multi_rank=int(row.multi_rank), multi_degree=int(row.multi_degree),
-            unique_conflict_partners=int(row.unique_conflict_partners), conflict_point_involvement=int(row.conflict_point_involvement), CI_multi_l2=float(row.CI_multi_l2),
+            unique_conflict_partners=int(row.unique_conflict_partners), conflict_point_involvement=int(row.conflict_point_involvement),
+            **{f"CI_multi_l{CI_L}": float(row[f"CI_multi_l{CI_L}"])},
             stage1_changed=_is_changed(before, after1), stage1_primary_strategy="+".join(str(v) for v in flight_strategies(after1)) or "none",
             atd_before=before.atd, atd_after_stage1=after1.atd, atd_after_stage2=after2.atd,
             speed_before=_mean_speed(before), speed_after_stage1=_mean_speed(after1), speed_after_stage2=_mean_speed(after2),
@@ -179,6 +187,10 @@ def _dense_rows(initial, stage1, final, initial_conflicts, stage1_conflicts, fin
 
 
 def main() -> None:
+    global CI_L
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ci-l", type=int, choices=(1, 2, 3, 4), default=2)
+    CI_L = parser.parse_args().ci_l
     root = Path(__file__).resolve().parent
     baseline = baseline_metadata(root)
     if baseline_plan_hash(root) != baseline["sha256"]:
@@ -196,11 +208,12 @@ def main() -> None:
         raise RuntimeError(f"Baseline conflict validation failed: {len(deterministic)}/{len(initial)}/{count_conflict_pairs(initial)}")
     metrics, topology, multi = multi_metrics(plans, initial)
     keys = metrics.head(KEY_COUNT).flight_id.astype(int).tolist()
-    if len(keys) != KEY_COUNT or keys != sorted(topology.nodes, key=lambda fid: (-metrics.set_index("flight_id").loc[fid, "CI_multi_l2"], fid))[:KEY_COUNT]:
-        raise AssertionError("Stage1 keys are not the Multi-degree CI l=2 Top10")
+    ci_column = f"CI_multi_l{CI_L}"
+    if len(keys) != KEY_COUNT or keys != sorted(topology.nodes, key=lambda fid: (-metrics.set_index("flight_id").loc[fid, ci_column], fid))[:KEY_COUNT]:
+        raise AssertionError(f"Stage1 keys are not the Multi-degree CI l={CI_L} Top10")
     key_point_coverage, key_pair_coverage = coverage(initial, keys)
     stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    run_id = f"{stamp}_baseline_multiline_seed0"
+    run_id = f"{stamp}_baseline_multiline_l{CI_L}_seed0"
     out = root / "outputs" / "multiline_baseline_full_run" / run_id
     out.mkdir(parents=True, exist_ok=False)
     metrics.head(20).assign(rank=range(1, 21)).to_csv(out / "multi_top20.csv", index=False)
@@ -209,10 +222,10 @@ def main() -> None:
     print(metrics.head(20).to_string(index=False), flush=True)
     for flight_id in DENSE_IDS:
         value = metrics[metrics.flight_id.eq(flight_id)].iloc[0]
-        print(f"{flight_id}: degree={value.multi_degree}, partners={value.unique_conflict_partners}, involvement={value.conflict_point_involvement}, CI={value.CI_multi_l2}, rank={value.multi_rank}", flush=True)
+        print(f"{flight_id}: degree={value.multi_degree}, partners={value.unique_conflict_partners}, involvement={value.conflict_point_involvement}, CI={value[ci_column]}, rank={value.multi_rank}", flush=True)
     _plot_multiline_network(plans, multi, metrics, out / "conflict_network_multiline.png")
     plot_routes_3d(grid, plans, out / "initial_routes.png", "Frozen baseline initial routes")
-    write_fata_3d_html(grid, plans, initial, out / "fata_3d_before.html", "Frozen baseline before scheduling: Multi CI Top10", keys)
+    write_fata_3d_html(grid, plans, initial, out / "fata_3d_before.html", f"Frozen baseline before scheduling: Multi CI l={CI_L} Top10", keys)
     start = time.perf_counter()
     set_random_seed(OPTIMIZER_SEED)
     result = optimize_paper_schedule(copy.deepcopy(plans), initial, keys, cfg, grid, risk_map, progress=True)
@@ -271,13 +284,13 @@ def main() -> None:
     )
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     dense_summary = "\n".join(
-        f"- Flight {row.flight_id}: multi degree={int(row.multi_degree)}, CI_multi_l2={row.CI_multi_l2:.1f}, "
+        f"- Flight {row.flight_id}: multi degree={int(row.multi_degree)}, {ci_column}={getattr(row, ci_column):.1f}, "
         f"rank={int(row.multi_rank)}, Multi Top10={bool(row.is_multi_top10)}."
         for row in dense.itertuples(index=False)
     )
     dense_key_count = int(dense.is_multi_top10.sum())
     multiline_finding = (
-        "Multi-degree correctly exposes the repeated-conflict incident count, but this fixed l=2 CI did not select "
+        f"Multi-degree correctly exposes the repeated-conflict incident count, but this fixed l={CI_L} CI did not select "
         "the dense flights in this baseline because their simple-topology two-hop shell contribution is zero or small."
         if dense_key_count == 0 else
         "Multi-degree CI selected part of the dense-flight set in this baseline."
@@ -287,7 +300,7 @@ def main() -> None:
 1. Frozen baseline loaded: yes. Source commit `{BASELINE_SOURCE_COMMIT}`.
 2. Baseline hash validated before and after the run: `{baseline['sha256']}`.
 3. Initial deterministic/uncertain conflict points: {len(deterministic)} / {len(initial)}; unique pairs: {count_conflict_pairs(initial)}.
-4. Multi CI l=2 Top10: `{keys}`.
+4. Multi CI l={CI_L} Top10: `{keys}`.
 5. Dense-flight results:
 {dense_summary}
 6. Multi Top10 covers {int(round(key_point_coverage * len(initial)))} / {len(initial)} conflict points ({key_point_coverage:.4%}); unique-pair coverage is {key_pair_coverage:.4%}.
