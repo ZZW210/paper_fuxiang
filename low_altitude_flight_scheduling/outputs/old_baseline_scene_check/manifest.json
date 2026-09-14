@@ -1,0 +1,23 @@
+{
+  "baseline_source_commit": "11e1a049d5f397362a97d7620ecaa4553209a6d4",
+  "baseline_plan_hash": "5580bd2ad2cbdcea7dac0b3f8ac8dd990babce979aee4b274285986bc68facf7",
+  "number_of_flights": 100,
+  "deterministic_conflicts": 99,
+  "uncertain_conflicts": 130,
+  "unique_conflict_pairs": 85,
+  "max_degree": 5,
+  "ci_top10": [
+    41,
+    62,
+    18,
+    64,
+    83,
+    4,
+    16,
+    80,
+    49,
+    3
+  ],
+  "top10_conflict_point_coverage": 0.24615384615384617,
+  "stages_executed": []
+}

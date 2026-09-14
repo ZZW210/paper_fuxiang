@@ -153,6 +153,8 @@ class RunArchive:
                              Ngen_stage1=cfg["fata"]["Ngen_max_stage1"], Ngen_stage2=cfg["fata"]["Ngen_max_stage2"],
                              n_jobs=cfg["optimization"]["n_jobs"], python_version=sys.version,
                              platform=platform.platform(), cpu_count=os.cpu_count(), config_file=str(self.root / args.config),
+                             baseline_plan_hash=cfg.get("baseline_plans", {}).get("sha256"),
+                             baseline_source_commit=cfg.get("baseline_plans", {}).get("source_commit"),
                              initial_conflicts=None, stage1_conflicts=None, final_conflicts=None,
                              blas_threads={k: os.environ.get(k) for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")},
                              performance_timing_note="Inclusive worker CPU-wall timings overlap parent evaluation wall time; serialization is a pickle probe, not isolated IPC time.")

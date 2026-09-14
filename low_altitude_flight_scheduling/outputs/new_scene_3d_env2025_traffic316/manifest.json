@@ -39,5 +39,8 @@
     47,
     56
   ],
-  "stages_executed": []
+  "stages_executed": [],
+  "status": "deprecated_bad_flight_plan_scene",
+  "formal_baseline": false,
+  "deprecation_reason": "3D inspection found widespread ground-hugging route segments; do not use this generated scene for network, CI, Stage1, Stage2, or reproduction experiments."
 }

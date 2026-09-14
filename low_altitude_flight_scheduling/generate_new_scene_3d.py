@@ -1,7 +1,7 @@
-"""Write 3D inspection pages for the fixed env2025 / traffic316 paper scene.
+"""Deprecated generator for the rejected env2025 / traffic316 plan scene.
 
-This script deliberately stops after initial-plan construction and conflict
-validation.  It never invokes either scheduling stage.
+Its existing outputs remain as historical evidence only. Formal reproduction
+runs use data/baseline_initial_plans.pkl and must not regenerate this scene.
 """
 from __future__ import annotations
 
@@ -78,6 +78,10 @@ def _dense_sidebar(metrics: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    raise RuntimeError(
+        "deprecated_bad_flight_plan_scene: this generator is not a formal baseline. "
+        "Use data/baseline_initial_plans.pkl through the baseline diagnostics instead."
+    )
     parser = argparse.ArgumentParser()
     parser.add_argument("--environment-seed", type=int, default=2025)
     parser.add_argument("--traffic-seed", type=int, default=316)

@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import apply_quick_overrides, load_config, resolve_scene_seeds
+from src.baseline_plans import baseline_metadata
 from src.conflict_detection import (
     count_conflict_edges,
     count_conflict_pairs,
@@ -222,6 +223,8 @@ def main() -> None:
         raise ValueError("n_jobs must be between 1 and 8")
     if cfg["optimization"]["scheduler_mode"] == "paper_strict":
         cfg["conflict"]["t_conflict"] = 30.0
+        if int(cfg["flight"]["n_flights"]) == 100:
+            cfg["baseline_plans"] = baseline_metadata(root)
     from src.run_archive import RunArchive
 
     with RunArchive(root, root / args.outputs, cfg, args) as archive:

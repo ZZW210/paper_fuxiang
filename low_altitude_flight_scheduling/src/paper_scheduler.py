@@ -18,6 +18,7 @@ from .conflict_detection import (detect_conflicts, count_conflict_pairs, write_c
 from .conflict_network import (build_conflict_network, network_metrics, run_attack_suite,
                                select_paper_key_flights, write_network_outputs)
 from .flight_plan import generate_flight_plans, write_flight_generation_report
+from .baseline_plans import load_baseline_plans
 from .grid import AirspaceGrid
 from .paper_optimization import (PaperPopulationObjective, PaperReference, PaperEvaluation,
                                 build_stage1_decision_layout, build_stage2_decision_layout,
@@ -217,7 +218,12 @@ def run_paper_main(cfg, args, root: Path):
     cfg["conflict"]["t_conflict"] = 30.0
     grid = AirspaceGrid.from_config(cfg, seed=cfg.get("environment_seed", args.seed))
     risk_map = generate_risk_map(grid, cfg, out)
-    plans = generate_flight_plans(grid, risk_map, cfg, out, seed=cfg.get("traffic_seed", args.seed))
+    baseline = cfg.get("baseline_plans")
+    if baseline and int(cfg["flight"]["n_flights"]) == 100:
+        plans = load_baseline_plans(root)
+        print(f"Using immutable baseline plans: {baseline['sha256']}", flush=True)
+    else:
+        plans = generate_flight_plans(grid, risk_map, cfg, out, seed=cfg.get("traffic_seed", args.seed))
     for plan in plans:
         if plan.etd < 1.0:
             shift = 1.0 - plan.etd
@@ -247,6 +253,8 @@ def run_paper_main(cfg, args, root: Path):
     counts1, counts2 = _counts(stage1_assignments), _counts(stage2_assignments)
     summary = dict(
         scheduler_mode="paper_strict", seed=args.seed, n_jobs=cfg["optimization"]["n_jobs"],
+        baseline_plan_hash=baseline.get("sha256") if baseline else None,
+        baseline_source_commit=baseline.get("source_commit") if baseline else None,
         paper_objective_scale_mode=cfg["optimization"]["paper_objective_scale_mode"],
         run_id=cfg.get("run", {}).get("run_id", "unarchived"),
         NP=cfg["fata"]["NP"], Ngen_max_stage1=cfg["fata"]["Ngen_max_stage1"], Ngen_max_stage2=cfg["fata"]["Ngen_max_stage2"],

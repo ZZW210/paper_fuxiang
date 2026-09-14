@@ -12,6 +12,14 @@ population:
 # The paper does not disclose distance units; preserve the existing default.
 astar_distance_scale_mode: "meter"
 
+# Formal paper-strict runs load and verify this immutable historical plan set.
+# The environment/risk configuration remains current; only initial flights are fixed.
+baseline_plans:
+  enabled: true
+  path: "data/baseline_initial_plans.pkl"
+  source_commit: "11e1a049d5f397362a97d7620ecaa4553209a6d4"
+  sha256: "5580bd2ad2cbdcea7dac0b3f8ac8dd990babce979aee4b274285986bc68facf7"
+
 paper_scene:
   generation_mode: "paper_random"
   n_flights: 100

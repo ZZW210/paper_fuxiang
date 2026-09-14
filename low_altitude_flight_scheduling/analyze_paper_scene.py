@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--traffic-seed", type=int, default=None)
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--outputs", default="outputs/runs")
-    parser.add_argument("--baseline-plans", default="outputs/initial_plans.pkl")
+    parser.add_argument("--baseline-plans", default="data/baseline_initial_plans.pkl")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     cfg = load_config(root / args.config, {"optimization": {"scheduler_mode": "paper_strict"}})
