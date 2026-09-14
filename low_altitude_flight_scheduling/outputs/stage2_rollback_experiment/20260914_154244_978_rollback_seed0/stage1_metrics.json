@@ -1,0 +1,23 @@
+{
+  "initial_conflict_points": 130,
+  "initial_conflict_pairs": 85,
+  "key_flights": [
+    52,
+    77,
+    87,
+    70,
+    41,
+    62,
+    16,
+    83,
+    4,
+    18
+  ],
+  "stage1_final_conflict_points": 69,
+  "stage1_final_conflict_pairs": 60,
+  "stage1_fitness": 2927289.6305803587,
+  "stage1_runtime_sec": 20.080068299999766,
+  "stage1_dimension": 614,
+  "rollback_enabled": false,
+  "stage1_matches_reference": true
+}

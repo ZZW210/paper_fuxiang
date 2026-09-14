@@ -1,0 +1,23 @@
+{
+  "search": {
+    "action_count": 388271,
+    "acceptance_rule_verified": true,
+    "every_candidate_starts_from_stage1": true,
+    "rollback_chain_continuity_verified": true
+  },
+  "selected": {
+    "action_count": 55,
+    "acceptance_rule_verified": true,
+    "every_candidate_starts_from_stage1": true,
+    "rollback_chain_continuity_verified": true
+  },
+  "final_global_recheck": {
+    "flight_count": 100,
+    "valid_routes": true,
+    "baseline_hash_verified": true,
+    "conflict_points": 2,
+    "conflict_pairs": 2,
+    "full_conflict_records_match": true,
+    "provenance_match": true
+  }
+}

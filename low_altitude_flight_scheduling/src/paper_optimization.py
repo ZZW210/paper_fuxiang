@@ -334,7 +334,11 @@ def _recompute_paper_timing(plan, grid, risk_map):
     plan.risk_sum = float(sum(risk_map[c] for c in plan.path))
 
 
-def _decode(vector, base_plans, initial_plans, layout, cfg, grid, risk_map, strategies=None, route_cache=None):
+def _decode(vector, base_plans, initial_plans, layout, cfg, grid, risk_map, strategies=None, route_cache=None, generation=0):
+    if strategies is not None and cfg.get("optimization", {}).get("stage2_global_rollback", False):
+        from .stage2_rollback import decode_with_rollback
+        return decode_with_rollback(vector, base_plans, initial_plans, layout, cfg, grid,
+                                    risk_map, strategies, route_cache, generation)
     vector = np.clip(np.asarray(vector, dtype=float), layout.lower, layout.upper)
     if vector.shape != (layout.dim,):
         raise ValueError("Incorrect paper decision vector dimension")
@@ -460,7 +464,7 @@ class PaperPopulationObjective:
     def evaluation(self, vector, generation, context=None):
         with self.profile.measure("route_decode"):
             plans = _decode(vector, self.base_plans, self.initial_plans, self.layout, self.cfg,
-                            self.grid, self.risk_map, context if self.stage == 2 else None, self.route_cache)
+                            self.grid, self.risk_map, context if self.stage == 2 else None, self.route_cache, generation)
         with self.profile.measure("conflict_detection"):
             conflicts = (self.incremental.evaluate(plans) if self.cfg.get("paper_performance", {}).get("incremental_conflicts", True)
                          else detect_conflicts(plans, self.cfg, uncertain=True))

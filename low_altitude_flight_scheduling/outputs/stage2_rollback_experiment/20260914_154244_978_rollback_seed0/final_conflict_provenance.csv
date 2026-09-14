@@ -1,0 +1,3 @@
+flight_a,flight_b,cell_x,cell_y,cell_z,idx_a,idx_b,provenance
+7,27,35,46,2,23,33,exact_survivor
+36,94,37,19,2,16,19,exact_survivor

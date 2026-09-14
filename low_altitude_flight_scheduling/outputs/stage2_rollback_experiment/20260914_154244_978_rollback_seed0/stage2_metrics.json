@@ -1,0 +1,31 @@
+{
+  "final_conflict_points": 2,
+  "final_conflict_pairs": 2,
+  "final_exact_survivors": 2,
+  "final_moved_same_pair": 0,
+  "final_new_conflict_points": 0,
+  "final_new_conflict_pairs": 0,
+  "risk_increase_percent": -1.523310030610403,
+  "delayed_flights": 29,
+  "changed_flights": 44,
+  "final_paper_fitness": 94107.31718130587,
+  "stage2_runtime_sec": 1393.169037900001,
+  "stage2_runtime_increase_sec": 1347.8475495000012,
+  "stage2_runtime_ratio": 30.73970178569872,
+  "zero_conflict": false,
+  "stage2_dimension": 1304,
+  "fitness_evaluations": 10199,
+  "adm_probability_updates": 200,
+  "count_scope": "all search decodes including incumbent reevaluations and final ADM decode; not unique committed schedule actions",
+  "rollback_count": 208773,
+  "accepted_action_count": 179498,
+  "pairs_increased_count": 50441,
+  "same_pairs_points_not_decreased_count": 158332,
+  "selected_plan_action_counts": {
+    "rollback_count": 20,
+    "accepted_action_count": 35,
+    "pairs_increased_count": 2,
+    "same_pairs_points_not_decreased_count": 18
+  },
+  "original_new_pairs_still_present": []
+}
