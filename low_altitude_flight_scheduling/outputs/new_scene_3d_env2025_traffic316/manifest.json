@@ -1,0 +1,43 @@
+{
+  "environment_seed": 2025,
+  "traffic_seed": 316,
+  "deterministic_conflicts": 53,
+  "uncertain_conflicts": 107,
+  "multi_degree_ci_l2_top10": [
+    73,
+    47,
+    49,
+    56,
+    33,
+    78,
+    42,
+    25,
+    1,
+    63
+  ],
+  "dense_conflict_top15": [
+    73,
+    47,
+    49,
+    56,
+    33,
+    78,
+    42,
+    25,
+    1,
+    63,
+    98,
+    99,
+    58,
+    45,
+    59
+  ],
+  "focus_flights": [
+    49,
+    73,
+    98,
+    47,
+    56
+  ],
+  "stages_executed": []
+}

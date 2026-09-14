@@ -244,6 +244,9 @@ def write_fata_3d_html(
     output_path: str | Path,
     title: str,
     key_ids: list[int] | None = None,
+    highlight_ids: list[int] | None = None,
+    dim_other_routes: bool = False,
+    sidebar_html: str | None = None,
 ) -> None:
     output_path = Path(output_path)
     ensure_dir(output_path.parent)
@@ -255,6 +258,7 @@ def write_fata_3d_html(
         return
 
     key = set(key_ids or [])
+    highlights = set(highlight_ids or [])
     plan_map = {plan.id: plan for plan in plans}
     no_ground_points = {plan.id: _route_display_points(grid, plan, include_ground=False) for plan in plans}
     cell_indices = {
@@ -294,12 +298,13 @@ def write_fata_3d_html(
         display_pts = _route_display_points(grid, plan)
         label = _plan_label(plan.id)
         is_key = plan.id in key
+        is_highlight = plan.id in highlights
         route_name = "关键计划" if is_key else "普通航线"
         show_route_legend = (is_key and not shown_key_route_legend) or ((not is_key) and not shown_regular_route_legend)
         shown_key_route_legend = shown_key_route_legend or is_key
         shown_regular_route_legend = shown_regular_route_legend or (not is_key)
-        width = 5 if is_key else 3
-        opacity = 0.95 if is_key else 0.58
+        width = 6 if is_highlight else (5 if is_key else 3)
+        opacity = 0.98 if is_highlight else (0.95 if is_key else (0.14 if dim_other_routes else 0.58))
         route_trace_index = len(fig.data)
         route_indices.append(route_trace_index)
         route_trace_by_plan[plan.id] = route_trace_index
@@ -445,7 +450,7 @@ def write_fata_3d_html(
         paper_bgcolor="#F5F7FA",
         plot_bgcolor="white",
         scene=dict(
-            domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
+            domain=dict(x=[0.0, 0.76 if sidebar_html else 1.0], y=[0.0, 1.0]),
             xaxis_title="<b>X 坐标 (m)</b>",
             yaxis_title="<b>Y 坐标 (m)</b>",
             zaxis_title="<b>高度 (m)</b>",
@@ -507,7 +512,23 @@ def write_fata_3d_html(
                 font=dict(size=12, color="#1A1A1A"),
                 opacity=1.0,
             )
-        ],
+        ] + ([
+            dict(
+                text=sidebar_html,
+                align="left",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.985,
+                y=0.975,
+                xanchor="right",
+                yanchor="top",
+                bgcolor="rgba(255,255,255,0.96)",
+                bordercolor="rgba(0,0,0,0.22)",
+                borderwidth=1,
+                font=dict(size=11, color="#1A1A1A"),
+            )
+        ] if sidebar_html else []),
     )
     route_trace_by_plan_payload = {str(k): v for k, v in route_trace_by_plan.items()}
     plan_by_route_trace_payload = {str(v): str(k) for k, v in route_trace_by_plan.items()}
