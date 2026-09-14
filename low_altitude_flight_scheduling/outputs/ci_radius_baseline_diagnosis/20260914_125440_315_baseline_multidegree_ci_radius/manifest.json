@@ -1,0 +1,66 @@
+{
+  "baseline_plan_hash": "5580bd2ad2cbdcea7dac0b3f8ac8dd990babce979aee4b274285986bc68facf7",
+  "deterministic_conflicts": 99,
+  "uncertain_conflicts": 130,
+  "unique_pairs": 85,
+  "degree_mode": "multi",
+  "tested_l": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "Top10_l1": [
+    52,
+    77,
+    87,
+    70,
+    41,
+    62,
+    16,
+    83,
+    4,
+    18
+  ],
+  "Top10_l2": [
+    41,
+    62,
+    64,
+    4,
+    83,
+    18,
+    16,
+    56,
+    78,
+    80
+  ],
+  "Top10_l3": [
+    83,
+    62,
+    16,
+    64,
+    4,
+    78,
+    18,
+    56,
+    41,
+    53
+  ],
+  "Top10_l4": [
+    83,
+    56,
+    89,
+    78,
+    53,
+    2,
+    16,
+    64,
+    31,
+    97
+  ],
+  "coverage_l1": 0.46923076923076923,
+  "coverage_l2": 0.24615384615384617,
+  "coverage_l3": 0.2692307692307692,
+  "coverage_l4": 0.25384615384615383,
+  "optimizers_executed": false
+}
