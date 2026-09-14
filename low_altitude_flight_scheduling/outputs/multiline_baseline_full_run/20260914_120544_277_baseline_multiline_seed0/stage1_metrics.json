@@ -1,0 +1,27 @@
+{
+  "initial_conflict_points": 130,
+  "initial_conflict_pairs": 85,
+  "key_flights": [
+    41,
+    62,
+    64,
+    4,
+    83,
+    18,
+    16,
+    56,
+    78,
+    80
+  ],
+  "key_conflict_point_coverage": 0.24615384615384617,
+  "key_conflict_pair_coverage": 0.3176470588235294,
+  "stage1_final_conflict_points": 98,
+  "stage1_final_conflict_pairs": 58,
+  "stage1_conflict_reduction": 0.24615384615384617,
+  "stage1_changed_flights": 10,
+  "stage1_delayed_flights": 3,
+  "stage1_risk_increase_percent": 0.0,
+  "stage1_fitness": 4143346.3398979343,
+  "stage1_runtime_sec": 19.698277499999676,
+  "stage1_dimension": 619
+}

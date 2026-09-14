@@ -1,0 +1,41 @@
+{
+  "run_id": "20260914_120544_277_baseline_multiline_seed0",
+  "baseline_source_commit": "11e1a049d5f397362a97d7620ecaa4553209a6d4",
+  "baseline_plan_hash": "5580bd2ad2cbdcea7dac0b3f8ac8dd990babce979aee4b274285986bc68facf7",
+  "conflict_parameters": {
+    "t_conflict": 30.0,
+    "cell_occupancy_time": 0.0,
+    "alpha": 0.05,
+    "sigma0": 1.0,
+    "sigma_rate": 0.01,
+    "conflict_spatial_buffer_cells": 0
+  },
+  "key_flight_mode": "multi_degree_ci",
+  "ci_l": 2,
+  "important_ratio": 0.1,
+  "optimizer_seed": 0,
+  "NP": 50,
+  "Ngen": 200,
+  "Parf": 0.2,
+  "initial_deterministic_conflicts": 99,
+  "initial_uncertain_conflicts": 130,
+  "initial_conflict_pairs": 85,
+  "multi_top10": [
+    41,
+    62,
+    64,
+    4,
+    83,
+    18,
+    16,
+    56,
+    78,
+    80
+  ],
+  "key_conflict_point_coverage": 0.24615384615384617,
+  "stage1_remaining": 98,
+  "final_remaining": 11,
+  "risk_increase_percent": 0.1634421796402009,
+  "delayed_flights": 27,
+  "changed_flights": 52
+}

@@ -57,7 +57,9 @@ def optimize_paper_schedule(plans, conflicts, key_ids, cfg, grid, risk_map, prog
             evaluation = objective.evaluation(position, generation, context)
             trace.append(dict(global_generation=offset + generation, stage=stage,
                               stage_generation=generation, fitness=evaluation.fitness,
-                              **evaluation.components, delta=evaluation.delta))
+                              **evaluation.components,
+                              conflict_pairs=count_conflict_pairs(evaluation.conflicts),
+                              delta=evaluation.delta))
             if progress and (generation == 1 or generation % 10 == 0 or generation == objective.max_gen):
                 print(f"{stage} generation {generation}/{objective.max_gen}: "
                       f"fitness={score:.6f}, Nc={evaluation.components['Nc']}", flush=True)
